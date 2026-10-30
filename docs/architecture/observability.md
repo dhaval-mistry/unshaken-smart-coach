@@ -1,7 +1,17 @@
 # Local observability design
 
-Status: **PROPOSED FOR HUMAN REVIEW**. No services, instrumentation, or
+Design status: **Local approach approved** by the owner with stories #7-#11.
+The owner also requested the concrete shared-package layout documented below.
+
+Implementation status: **Not started**. No services, instrumentation, or
 configuration are implemented by this document.
+
+Related work: [publish design #7](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/7),
+[Docker stack #8](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/8),
+[shared Python package #9](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/9),
+[examples #10](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/10), and
+[verification #11](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/11).
+The issue descriptions record the approved local approach and retention.
 
 ## Repository baseline
 
@@ -94,12 +104,43 @@ observability/loki/loki.yaml             Local log storage and retention
 observability/tempo/tempo.yaml           Trace ingestion and local storage
 observability/grafana/provisioning/      Data-source and dashboard provisioning
 observability/grafana/dashboards/         Reviewed dashboard JSON
-backend/.../telemetry/                   Shared app telemetry, when scaffolded
+backend/app/telemetry/                   Shared Python telemetry, when scaffolded
 ```
 
 Except the documentation, root Compose and the existing observability README,
 these paths are proposed and do not exist yet. Do not create empty folders just
 to match the diagram. Avoid separate component installation guides initially.
+
+## Shared Python package
+
+Use `backend/app/telemetry/` for reusable Python code. Use `observability/` for
+container/service configuration. These have different responsibilities:
+
+```text
+backend/app/telemetry/
+├── __init__.py     Public helpers used by callers
+├── setup.py        Initialize once; configure export; bounded shutdown/flush
+├── logging.py      Structured logs with trace/span IDs
+├── metrics.py      Safe counters and duration recording
+└── tracing.py      Traces and supported standard instrumentation
+```
+
+These are intended module responsibilities, not existing implementations or a
+requirement to add empty files. Tests belong in `backend/tests/telemetry/`.
+FastAPI startup and commands in `backend/scripts/` initialize the same package
+in their own process; neither caller duplicates exporter setup. Use the backend
+uv project so scripts can import the package without ad hoc Python path edits.
+
+For example, a database command can create a trace for "load sample records",
+record its duration, and log success. It must not log passwords, SQL parameter
+values, user notes, or actual lifting weights. A short command must flush within
+a fixed timeout before exiting. Importing telemetry alone must not start
+network connections or background exporters.
+
+Frontend code will need its own TypeScript integration if later approved. It
+can follow the same safe naming/correlation rules but cannot reuse Python
+modules. Monitoring the PostgreSQL server itself is separate from tracing
+Python database calls. SQL migrations do not initialize this package.
 
 ## Application instrumentation contract
 
@@ -146,7 +187,7 @@ Use independent named volumes for Grafana, Prometheus, Loki, and Tempo; never
 reuse the PostgreSQL volume. Local storage is for development, not a backup or
 production architecture.
 
-Proposed starting retention is 3 days for metrics/logs and 24 hours for traces.
+Approved starting retention is 3 days for metrics/logs and 24 hours for traces.
 Validate actual deletion behavior for the selected image versions; declaring a
 retention interval alone is not proof that storage is bounded. Document measured
 resource usage and disk growth from a small synthetic run. Do not promise a
@@ -155,7 +196,7 @@ must leave PostgreSQL running and preserve all its records.
 
 ## Implementation and verification handoff
 
-After human design approval, a separately requested Developer task should:
+Under the approved stories, a separately requested Developer task should:
 
 1. Add pinned images, compatible component configurations, private settings,
    health checks, and data-source provisioning under the existing Compose setup.
@@ -174,14 +215,16 @@ After human design approval, a separately requested Developer task should:
 No service launch, configuration validation against images, signal delivery,
 load test, or retention test has been performed by this design task.
 
-## Approval and open choices
+## Approval and remaining implementation choices
 
-Human approval is needed before calling this design implementation-ready.
-Recommended defaults are a local optional Compose profile, Prometheus scraping,
-native Loki OTLP, internal stores, and the retention windows above. These remain
-proposals until approved. Versions, actual resource limits and dashboard queries
-are routine engineering choices to select and verify during implementation.
-No unresolved database product decision is decided by this proposal.
+The owner approved the local optional Compose approach, shared Python telemetry,
+Prometheus scraping, native Loki OTLP, internal stores, and the retention windows
+above. Preserve this approval; do not ask for it again. Exact ports noted as
+proposed, compatible versions, actual resource limits and dashboard queries are
+routine engineering choices to select and verify during implementation. Ask
+before a material change to approved behavior or scope. No unresolved database
+product decision is decided by this document. Approval does not replace the
+runtime verification required by issues #8-#11.
 
 ## Official references
 

@@ -11,9 +11,13 @@ Follow these guides in order:
 Team members using Codex or Claude Code can also configure the
 [reusable development agents](development-agents.md).
 
-The [observability setup guide](observability.md) describes the proposed local
-Grafana, Prometheus, Loki, Tempo and Collector setup. It is not runnable until
-the stack is implemented; see its linked architecture proposal for review.
+The [observability setup guide](observability.md) describes the approved local
+Grafana, Prometheus, Loki, Tempo and Collector direction. It is not runnable
+until the stack is implemented and tested.
+
+Before coding, follow the [developer reading path](../README.md). Setup guides
+explain how to run tools; product rules and design choices live in the
+[architecture index](../architecture/README.md) and linked documents.
 
 The backend guide distinguishes current prerequisites from commands that will
 become available when the FastAPI application is scaffolded. Frontend setup

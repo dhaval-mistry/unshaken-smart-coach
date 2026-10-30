@@ -1,7 +1,7 @@
 # Local observability setup
 
 Status: **PLANNED, NOT RUNNABLE YET**. Root Compose currently defines PostgreSQL
-only. This guide describes the setup to implement after approval of the
+only. This guide describes the setup to implement from the approved local
 [observability design](../architecture/observability.md). It does not install
 or configure the stack today.
 

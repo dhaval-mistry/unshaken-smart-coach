@@ -205,6 +205,8 @@ We will avoid logging raw prompts, dietary or health details, credentials, and o
 
 For local infrastructure setup, follow the guides in [`docs/setup/`](docs/setup/README.md).
 
+Before implementing a story or fixing code, follow the [developer reading path](docs/README.md) and the [architecture index](docs/architecture/README.md).
+
 No board or Discord invitation link is published here yet. Ask the project maintainer in Discord for access.
 
 ### Fork and clone
