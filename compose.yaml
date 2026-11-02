@@ -8,9 +8,10 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-unshaken_smart_coach}
       POSTGRES_USER: ${POSTGRES_USER:-unshaken}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-for-local-development}
+      # An empty password is rejected by PostgreSQL when initializing a new volume.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

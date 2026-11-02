@@ -6,6 +6,8 @@ import sys
 import time
 from unittest.mock import Mock
 
+import pytest
+
 from app.telemetry import logging as telemetry_logging
 from app.telemetry import metrics as telemetry_metrics
 from app.telemetry import setup
@@ -81,6 +83,77 @@ def test_exporter_setup_failure_is_safe(monkeypatch):
     monkeypatch.setattr(setup, "_providers", None)
     monkeypatch.setattr(setup, "_finished", False)
     monkeypatch.setattr(setup, "_endpoint", lambda _: (_ for _ in ()).throw(ValueError("private")))
+    assert setup.initialize(enabled=True) is False
+
+
+def _mock_startup(monkeypatch):
+    """Replace SDK constructors so tests can observe ownership without threads."""
+    monkeypatch.setattr(setup, "_providers", None)
+    monkeypatch.setattr(setup, "_finished", False)
+    monkeypatch.setattr(setup, "_endpoint", lambda signal: "http://localhost:4318/v1/" + signal)
+    names = ("TracerProvider", "MeterProvider", "LoggerProvider", "OTLPSpanExporter", "OTLPMetricExporter",
+             "OTLPLogExporter", "BatchSpanProcessor", "BatchLogRecordProcessor", "PeriodicExportingMetricReader")
+    factories = {name: Mock() for name in names}
+    for name, factory in factories.items():
+        monkeypatch.setattr(setup, name, factory)
+    handler = logging.NullHandler()
+    monkeypatch.setattr(setup, "LoggingHandler", lambda **_: handler)
+    monkeypatch.setattr(setup.trace, "set_tracer_provider", Mock())
+    monkeypatch.setattr(setup.metrics, "set_meter_provider", Mock())
+    return factories, handler
+
+
+@pytest.mark.parametrize(("failed_factory", "resources"), [
+    ("BatchSpanProcessor", ("TracerProvider", "OTLPSpanExporter")),
+    ("MeterProvider", ("TracerProvider", "PeriodicExportingMetricReader")),
+    ("OTLPLogExporter", ("TracerProvider", "MeterProvider", "LoggerProvider")),
+])
+def test_partial_initialization_cleans_up_and_can_retry(monkeypatch, failed_factory, resources):
+    """Failures before global registration close owned resources before retrying."""
+    factories, handler = _mock_startup(monkeypatch)
+    factories[failed_factory].side_effect = RuntimeError("private test detail")
+    assert setup.initialize(enabled=True) is False
+    for name in resources:
+        factories[name].return_value.shutdown.assert_called_once()
+    assert handler not in setup.LOGGER.handlers
+    assert setup._finished is False
+    factories[failed_factory].side_effect = None
+    assert setup.initialize(enabled=True) is True
+    assert setup.shutdown() is True
+
+
+def test_failed_global_registration_detaches_handler_and_disables_retry(monkeypatch):
+    """Once registration starts, retry could reuse an already installed global."""
+    factories, handler = _mock_startup(monkeypatch)
+    setup.metrics.set_meter_provider.side_effect = RuntimeError("private test detail")
+    assert setup.initialize(enabled=True) is False
+    assert handler not in setup.LOGGER.handlers
+    assert setup._finished is True
+    for name in ("TracerProvider", "MeterProvider", "LoggerProvider"):
+        factories[name].return_value.shutdown.assert_called_once()
+    assert setup.initialize(enabled=True) is False
+
+
+def test_slow_startup_cleanup_prevents_retry(monkeypatch):
+    """A still-running cleanup worker blocks another installation attempt."""
+    factories, _ = _mock_startup(monkeypatch)
+    factories["OTLPSpanExporter"].side_effect = RuntimeError("failure")
+    worker = Mock()
+    worker.is_alive.return_value = True
+    monkeypatch.setattr(setup, "Thread", Mock(return_value=worker))
+    assert setup.initialize(enabled=True) is False
+    worker.join.assert_called_once_with(3.0)
+    assert setup._finished is True
+    assert setup.initialize(enabled=True) is False
+
+
+def test_failed_resource_cleanup_prevents_retry(monkeypatch):
+    """A cleanup error leaves ownership uncertain, so initialization stays off."""
+    factories, _ = _mock_startup(monkeypatch)
+    factories["OTLPSpanExporter"].side_effect = RuntimeError("startup failed")
+    factories["TracerProvider"].return_value.shutdown.side_effect = RuntimeError("cleanup failed")
+    assert setup.initialize(enabled=True) is False
+    assert setup._finished is True
     assert setup.initialize(enabled=True) is False
 
 

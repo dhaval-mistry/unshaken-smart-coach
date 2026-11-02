@@ -51,10 +51,18 @@ Review your private settings locally. The example supplies these defaults:
 | `POSTGRES_USER` | `unshaken` |
 | `POSTGRES_PASSWORD` | Set your own local password in `.env` |
 
-The example password is a development placeholder. Keep real credentials only
+The example leaves the password blank. Set a private password before starting a
+new database: PostgreSQL refuses to initialize an empty volume without one.
+Keep real credentials only
 in your private configuration; never paste them or a connection string into
 Git, issue evidence, or screenshots. Do not copy private values back into
 `.env.example`.
+
+PostgreSQL is published on `127.0.0.1`, so local clients can connect without
+exposing the port on every network interface. Changes to Compose settings do
+not update an already running container. Changing the port binding requires a
+separately reviewed container recreation; preserve the existing volume and data.
+Changing `.env` does not change the password in an initialized database.
 
 Check that the private file is ignored and not tracked:
 

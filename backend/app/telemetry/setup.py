@@ -44,7 +44,7 @@ def _endpoint(signal: str) -> str:
 
 def initialize(service: str = "unshaken-backend", enabled: bool | None = None) -> bool:
     """Install exporters once; return False when disabled or initialization fails."""
-    global _providers
+    global _providers, _finished
     with _lock:
         if _providers is not None:
             return True
@@ -53,26 +53,84 @@ def initialize(service: str = "unshaken-backend", enabled: bool | None = None) -
         # Service names are configuration, not user input or personal data.
         if service not in {"unshaken-backend", "unshaken-script", "unshaken-demo"}:
             return False
+        # Track ownership while building. Once a processor or provider takes
+        # ownership of an object, it is responsible for shutting that object down.
+        owned = []
+        handler = None
+        previous_level = LOGGER.level
+        registration_started = False
         try:
             endpoints = {signal: _endpoint(signal) for signal in ("logs", "metrics", "traces")}
             # Do not import arbitrary process/environment resource attributes:
             # they may contain private values or high-cardinality identifiers.
             resource = Resource({"service.name": service})
             traces = TracerProvider(resource=resource, shutdown_on_exit=False)
-            traces.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoints["traces"], timeout=2)))
-            reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoints["metrics"], timeout=2), export_interval_millis=5000)
+            owned.append(traces)
+            span_exporter = OTLPSpanExporter(endpoint=endpoints["traces"], timeout=2)
+            owned.append(span_exporter)
+            span_processor = BatchSpanProcessor(span_exporter)
+            owned.remove(span_exporter)
+            owned.append(span_processor)
+            traces.add_span_processor(span_processor)
+            owned.remove(span_processor)
+            metric_exporter = OTLPMetricExporter(endpoint=endpoints["metrics"], timeout=2)
+            owned.append(metric_exporter)
+            reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=5000)
+            owned.remove(metric_exporter)
+            owned.append(reader)
             meters = MeterProvider(resource=resource, metric_readers=[reader], shutdown_on_exit=False)
+            owned.remove(reader)
+            owned.append(meters)
             logs = LoggerProvider(resource=resource, shutdown_on_exit=False)
-            logs.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=endpoints["logs"], timeout=2)))
+            owned.append(logs)
+            log_exporter = OTLPLogExporter(endpoint=endpoints["logs"], timeout=2)
+            owned.append(log_exporter)
+            log_processor = BatchLogRecordProcessor(log_exporter)
+            owned.remove(log_exporter)
+            owned.append(log_processor)
+            logs.add_log_record_processor(log_processor)
+            owned.remove(log_processor)
             handler = LoggingHandler(logger_provider=logs)
             LOGGER.addHandler(handler)
             LOGGER.setLevel(logging.INFO)
+            # SDK global providers cannot be reset. If either registration fails,
+            # do not attempt another installation in this process.
+            registration_started = True
             trace.set_tracer_provider(traces)
             metrics.set_meter_provider(meters)
             _providers = (traces, meters, logs, handler)
             return True
         except Exception:
-            # Telemetry configuration must not stop the caller or print secrets.
+            if handler is not None:
+                LOGGER.removeHandler(handler)
+                try:
+                    handler.close()
+                except Exception:
+                    # Treat uncertain handler cleanup like any other failed cleanup.
+                    _finished = True
+            LOGGER.setLevel(previous_level)
+            cleanup_ok = [True]
+
+            def cleanup():
+                """Release partially created resources in reverse ownership order."""
+                for resource in reversed(owned):
+                    try:
+                        resource.shutdown()
+                    except Exception:
+                        cleanup_ok[0] = False
+
+            try:
+                worker = Thread(target=cleanup, daemon=True, name="telemetry-startup-cleanup")
+                worker.start()
+                worker.join(3.0)
+            except Exception:
+                # If cleanup cannot run, a retry could create duplicate workers.
+                _finished = True
+                return False
+            # A retry could duplicate workers or replace an installed global.
+            if registration_started or worker.is_alive() or not cleanup_ok[0]:
+                _finished = True
+            # Do not print private configuration or interrupt the application.
             return False
 
 

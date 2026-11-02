@@ -3,13 +3,16 @@
 import argparse
 from time import perf_counter
 from app.telemetry import initialize, log_event, operation_span, record_operation, shutdown
+from app.telemetry.tracing import mark_error
 
 
 def run_simulated_read(fail: bool = False) -> bool:
     """Record a clearly mocked success or failure using shared telemetry."""
     start = perf_counter()
-    with operation_span("database"):
+    with operation_span("database") as span:
         outcome = "error" if fail else "success"
+        if fail:
+            mark_error(span)
         log_event("operation.failed" if fail else "operation.completed", operation="database", outcome=outcome)
         record_operation("database", outcome, perf_counter() - start)
     return not fail

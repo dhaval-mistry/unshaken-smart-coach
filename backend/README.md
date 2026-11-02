@@ -45,8 +45,9 @@ Supported event names are `operation.started`, `operation.completed` and
 operations/outcomes become `other`; unknown event names are dropped. These
 limits prevent personal input and IDs becoming metric labels. Do not put
 credentials, personal details, SQL, raw requests, or exception messages in
-span attributes or console logs. A span intentionally does not record exception
-text automatically.
+span attributes or console logs. Unhandled exceptions mark the span as failed
+without recording the exception text. For a controlled failure, call
+`mark_error(span)` from `app.telemetry.tracing` while the span is active.
 
 Set `OTEL_SDK_DISABLED=true` in the private root `.env` to disable exporters.
 The default OTLP HTTP base is `http://127.0.0.1:4318`; use `http://alloy:4318`
