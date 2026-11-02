@@ -97,7 +97,7 @@ Account registration, authentication, and access controls will need their own ag
 | Agent framework | To be selected | Tool calling, conversation state, and controlled agent workflows |
 | Telemetry | OpenTelemetry | Application instrumentation and request correlation |
 | Dashboards | Grafana | Visualizing performance, errors, and AI activity |
-| Telemetry storage | Mimir proposed, with Loki and Tempo; see [observability design](docs/architecture/observability.md) | Metrics, logs, and distributed traces; Alloy/Mimir revision awaits approval |
+| Telemetry collection and storage | Grafana Alloy, Mimir, Loki, and Tempo planned | Collect signals and store metrics, logs, and distributed traces |
 | Packaging | Docker; local Compose setup planned | Consistent local services and configuration |
 | Automation | GitHub Actions | Automated checks and an eventual deployment workflow |
 | Collaboration | GitHub Issues, Projects, and pull requests | Backlog planning, ownership, and code review |
@@ -142,7 +142,7 @@ The following folders are a proposal and do not exist yet:
 | `backend/` | FastAPI application and AI integration |
 | `docs/` | Architecture decisions, API contracts, and setup guides |
 | `infra/` | Local services and deployment configuration |
-| `observability/` | Collection/storage configuration and Grafana dashboards; Alloy/Mimir revision proposed |
+| `observability/` | Planned Alloy and telemetry-store configuration and Grafana dashboards |
 | `.github/workflows/` | Automated checks and deployment workflows |
 
 ## 🤖 How the AI Coach Will Work
@@ -189,12 +189,7 @@ Observability will help us answer practical questions:
 | Traces | Connected spans for API requests, database work, tool calls, and model calls |
 | Dashboards | Application health, external dependency performance, and AI workflow activity |
 
-OpenTelemetry will be used for instrumentation. Grafana will visualize the collected signals; compatible storage backends and collection services will be selected during implementation.
-
-The [current design revision](docs/architecture/observability.md) proposes Alloy
-for collection and Mimir for metrics storage, keeping OpenTelemetry, Loki, and
-Tempo. It records the earlier Collector/Prometheus approval separately; the
-revision still needs owner approval and runtime verification.
+OpenTelemetry will provide instrumentation. Grafana Alloy will collect and forward logs, metrics, and traces to Loki, Mimir, and Tempo; Grafana will display them. The stack is planned and not yet installed.
 
 We will avoid logging raw prompts, dietary or health details, credentials, and other personal information. Logs and traces should use correlation identifiers that help troubleshoot without exposing user details.
 
@@ -372,7 +367,7 @@ The following choices still need team agreement:
 - Profile, authentication, and authorization design.
 - Database schema and migration tooling.
 - Deployment target and expected monthly budget.
-- Final telemetry storage and collection setup.
+- Local telemetry storage mode and container-log collection scope.
 - Meal data source and nutrition validation approach.
 - Open-source license.
 

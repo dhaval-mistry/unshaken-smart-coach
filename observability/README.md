@@ -1,17 +1,13 @@
 # Observability
 
-Future collection, storage, and Grafana configuration will live here. The
-current proposal uses Alloy, Mimir, Loki, Tempo, and Grafana while keeping
-OpenTelemetry in application code.
+Future Grafana Alloy, Mimir, Loki, Tempo, and Grafana configuration will live
+here as those capabilities are introduced. OpenTelemetry remains the shared
+application instrumentation; Alloy collects and forwards its signals.
 
 Keep runnable configurations here and human instructions under `docs/`:
 
-- [Proposed revision and earlier approval record](../docs/architecture/observability.md)
+- [Architecture design](../docs/architecture/observability.md)
 - [Planned local setup](../docs/setup/observability.md)
 
-No component configuration exists yet. The optional root Compose profile and
-PostgreSQL isolation keep their earlier approval. The Alloy/Mimir changes need
-owner review before implementation; do not build both old and new pipelines.
-
-Shared Python telemetry belongs in `backend/app/telemetry/`, not this folder.
-See the [system overview](../docs/architecture/overview.md) for code ownership.
+No component configuration exists yet. The proposed services will use an
+optional profile in the existing root Compose file, preserving PostgreSQL.

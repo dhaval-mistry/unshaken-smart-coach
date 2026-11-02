@@ -3,13 +3,13 @@
 Design status: **PROPOSED FOR REVIEW**. The owner requested an initial design;
 the contracts and recommendations here still need human approval.
 
-Implementation status: **Not started**. There is no FastAPI application,
-database migration tooling, or implemented endpoint in this repository yet.
+Implementation status: **Not started**. Database migrations exist, but there is
+no FastAPI application or implemented endpoint in this repository yet.
 
 Related context: [system overview](../architecture/overview.md),
 [database design](../database/design.md), [ER diagram](../database/er-diagram.mmd),
 [observability design](../architecture/observability.md), and
-[backend setup](../setup/backend.md). No API stories were created by this task.
+[backend setup](../setup/backend.md). Existing API stories are tracked in GitHub.
 
 ## Start with user actions
 
@@ -26,7 +26,7 @@ The other actions below show the next design steps, not approved API contracts.
 | Save a custom exercise | Save name, category, body part, and creator together | Later; needs verified identity and approved database enforcement |
 | Create or change a workout template | Save an ordered plan of exercises and sets | Later; needs template-readiness, editing, and archive rules |
 | Start a workout from a template or without one | Capture a starting plan without changing the source | Later; needs active-workout and incomplete-plan decisions |
-| Record a set and start rest | Save actual performance and start rest once, including on retry | Later; needs completion rules for Cardio/Duration and timer changes |
+| Record a set and start rest | Save actual performance and start rest once, including on retry | Later; follow approved measurement rules and decide timer changes |
 | Finish a workout | Save history, then handle the explicit template-update choice | Later; needs update mapping, conflict, and retry decisions |
 | Review workout history and previous performance | Read the user's preserved workout records | Later; needs history matching and correction decisions |
 
@@ -133,8 +133,7 @@ Readiness does not certify all 13 tables, every constraint, or that migrations
 are at head. The separate migration command and database verification must
 prove those. No startup or health handler runs migrations, creates tables, or
 inserts missing seeds. Neither health endpoint depends on ExerciseDB, AI
-services, Alloy, Grafana, Loki, Mimir, or Tempo. This remains true whether the
-earlier Collector/Prometheus plan or the proposed Alloy/Mimir revision is used.
+services, Alloy, Grafana, Loki, Mimir, or Tempo.
 
 ## Load choices for the New exercise form
 
@@ -180,8 +179,8 @@ The approved initial values, in order, are:
 On the initial seed state, verify eight categories and eleven body parts.
 `None` is a real body-part record, not JSON `null`, an empty string, or an
 unselected field. The future form requires deliberate selection; it must not
-silently choose None. Category does not make weight mandatory. Adding Cardio
-and Duration to a list does not decide their workout measurement rules.
+silently choose None. Category does not make weight mandatory. Cardio and
+Duration measurement rules are recorded in the database design.
 
 If a lookup table cannot be read or has no active choices, return `503` rather
 than `200` with an empty list or invented fallback. The future form should show
@@ -220,9 +219,8 @@ or connect to PostgreSQL merely by importing a route module.
 ## Logs, metrics, and traces
 
 Use `app.telemetry` as described in the
-[observability design](../architecture/observability.md). Its earlier shared
-OpenTelemetry boundary remains; the Alloy/Mimir revision is proposed. After
-approval, the shared SDK sends OTLP to Alloy, which forwards logs to Loki,
+[observability design](../architecture/observability.md). The approved direction
+keeps the shared OpenTelemetry boundary: the SDK sends OTLP to Alloy, which forwards logs to Loki,
 metrics to Mimir, and traces to Tempo. Route handlers must not configure direct
 store exporters or add a second metric ingestion path. Preserve all HTTP,
 lookup-data, and database-readiness rules in this API proposal.
@@ -253,7 +251,7 @@ These are future checks, not results from this documentation task:
 | Unexpected error | No SQL, credentials, input, or stack trace in response; safe correlated server evidence |
 | Repeated reads | Row counts and seed IDs remain unchanged; no writes or external provider/model calls occur |
 | Telemetry enabled and unavailable | Synthetic successful/failed lookup signals are discoverable when enabled; exporter outages leave API results unchanged |
-| Proposed Alloy/Mimir revision, after approval | Lookup metrics are queried from Mimir through Grafana; Alloy or store outages do not change lookup/liveness/database-readiness results; logs still link to Tempo traces |
+| Approved Alloy/Mimir direction | Lookup metrics are queried from Mimir through Grafana; Alloy or store outages do not change lookup/liveness/database-readiness results; logs still link to Tempo traces |
 | Generated API documentation | OpenAPI matches approved paths, schemas, statuses, and headers; examples match tests |
 
 Use backend unit/HTTP tests for response behavior and a fresh disposable
@@ -274,8 +272,8 @@ Keep the database's existing open decisions in its own
 This document resolves none of them. Identity design is needed before private
 exercise APIs; workout APIs also need the applicable workout decisions above.
 
-After human approval, a separately requested Product Owner can check existing
-issues and prepare small stories for:
+After human approval, a separately requested Product Owner can review the
+existing issues covering:
 
 1. FastAPI startup, shared responses, request IDs, and liveness, coordinated with
    the existing backend/telemetry foundation work.
@@ -283,7 +281,7 @@ issues and prepare small stories for:
 3. Category and body-part reads with contract and disposable-database checks.
 4. End-to-end telemetry evidence once the shared observability work is available.
 
-These are suggested boundaries, not created issues or approved delivery dates.
+These are suggested boundaries, not approved delivery dates.
 Reuse or extend overlapping work rather than duplicating it. Link the relevant
 sections here in each story and use the validation table for plain-language
 acceptance criteria. No frontend, authentication implementation, workout API,

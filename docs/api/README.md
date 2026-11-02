@@ -16,7 +16,7 @@ The initial design recommends four read-only endpoints. It also identifies the
 decisions needed before designing private exercises, templates, and workouts.
 It does not approve unresolved rules in the database design.
 
-The [observability revision](../architecture/observability.md) proposes Alloy
+The [observability design](../architecture/observability.md) uses Alloy
 and Mimir while keeping the shared OpenTelemetry package. It changes future
 export destinations and verification, not the API paths or database behavior.
 

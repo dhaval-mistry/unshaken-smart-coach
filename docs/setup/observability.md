@@ -1,12 +1,12 @@
 # Local observability setup
 
-Status: **PLANNED, NOT RUNNABLE YET**. The Alloy/Mimir revision is
-**proposed for approval**, not an installed stack. Root Compose still defines
+Status: **PLANNED, NOT RUNNABLE YET**. Alloy collection and Mimir metrics
+storage are approved, but the stack is not installed. Root Compose still defines
 PostgreSQL only. This guide contains no claim that the future commands work.
 
 Read the [design and approval record](../architecture/observability.md).
 The earlier approved plan used a standalone Collector and Prometheus. The
-proposed replacement keeps OpenTelemetry in application code and uses Alloy
+approved direction keeps OpenTelemetry in application code and uses Alloy
 for collection plus Mimir for metrics storage. Do not mix the two service lists.
 
 ## What will run
@@ -30,7 +30,7 @@ version-specific runtime verification; see the design's storage discussion.
 1. Follow the existing [Docker guide](docker.md).
 2. Use the repository root and existing private `.env` convention. Do not
    overwrite a personal `.env` with `.env.example`.
-3. Review the design, record approval, and update existing stories #7-#15
+3. Review the design's remaining decisions and update existing stories #7-#15
    through the separately requested Product Owner workflow.
 4. During implementation, select fixed compatible images, writable data paths,
    and private Grafana credentials. Commit placeholders only. No observability
@@ -91,8 +91,8 @@ The proposed default uses application logs sent through OpenTelemetry.
 Console logging remains available locally, but Alloy must not also collect
 those same entries through Docker.
 
-No Docker socket or host-log mount is needed in the initial setup. Docker
-container-log discovery is deferred. If later approved, document the exact
+The proposed application-only setup needs no Docker socket or host-log mount.
+The initial container-log scope remains open. If approved, document the exact
 container allowlist, platform-specific daemon permissions, duplicate prevention,
 read positions, and safe restart behavior before enabling it. A read-only
 socket mount does not restrict Docker API actions.

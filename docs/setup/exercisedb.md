@@ -54,21 +54,26 @@ chat message.
 
 ## 4. Create your local `.env` file
 
-From the repository root, copy the safe template.
+From the repository root, copy the safe template only if `.env` does not
+already exist. Keep your existing settings if the file is already present.
 
 Windows PowerShell:
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path -LiteralPath .env)) {
+    Copy-Item -LiteralPath .env.example -Destination .env
+}
 ```
 
 macOS or Linux:
 
 ```bash
-cp .env.example .env
+if [ ! -e .env ]; then
+    cp .env.example .env
+fi
 ```
 
-Open the new `.env` file and replace only the ExerciseDB key placeholder with
+Open your `.env` file and replace only the ExerciseDB key placeholder with
 your personal key:
 
 ```dotenv

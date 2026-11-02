@@ -3,9 +3,8 @@
 Design status: **Agreed direction**. Detailed product rules remain governed by
 their own design approvals and open questions.
 
-The [Alloy/Mimir observability revision](observability.md) is **proposed**, not
-approved. Its collection/storage choices in the diagram below await owner
-review; the earlier Collector/Prometheus approval is recorded in that design.
+The [Alloy/Mimir observability direction](observability.md) is approved. Local
+Mimir storage mode and container-log collection remain open decisions.
 
 Implementation status: **Application not started**. This document does not
 create application code, packages, services, or database tables.
@@ -18,9 +17,8 @@ The owner requested this documentation layout and shared-code guidance.
 
 The repository contains project/design/setup documents, agent definitions and
 their generator/tests, UI reference images, and a root Compose file defining
-PostgreSQL 17. Backend and frontend folders currently contain README files.
-There is no FastAPI/React application, migration setup, or working telemetry
-package yet. A database container definition is not an application schema.
+PostgreSQL 17. The backend contains database migrations, schema and tests.
+There is no FastAPI or React application or working telemetry package yet.
 
 ## Planned components
 
@@ -33,7 +31,7 @@ flowchart LR
     API --> Telemetry["Shared Python telemetry"]
     Service --> Telemetry
     Script["Python database scripts"] --> Telemetry
-    Telemetry --> Alloy["Collection service: Alloy proposed"]
+    Telemetry --> Alloy["Collection service: Alloy"]
 ```
 
 The frontend does not access PostgreSQL directly. The backend checks ownership
@@ -54,7 +52,7 @@ operation took. Logs must not contain the user's lifting weight or credentials.
 | `backend/app/telemetry/` | Shared Python log/metric/trace setup and helpers |
 | `backend/scripts/` | Backend-specific Python commands that reuse application packages |
 | `scripts/` | Repository-wide helpers, such as the agent generator |
-| `observability/` | Collection/storage configuration and Grafana provisioning; Alloy/Mimir revision proposed; not application Python code |
+| `observability/` | Collection/storage configuration and Grafana provisioning; not application Python code |
 | `compose.yaml` | Existing PostgreSQL and future optional local services |
 | `tests/` | Cross-system tests and repository-tool tests |
 | `docs/` | Maintained designs, decisions, API descriptions, and setup guides |
@@ -74,7 +72,7 @@ backend/
 │   ├── db/                 Connections and database access
 │   └── telemetry/          Shared Python telemetry
 ├── scripts/                Python commands using app packages
-├── migrations/             Versioned schema changes when tooling is added
+├── migrations/             Versioned database schema changes
 ├── tests/                  Backend unit and integration tests
 ├── pyproject.toml          Dependencies and Python requirement
 └── uv.lock                 Locked dependency versions
@@ -84,8 +82,7 @@ Use one backend uv project and the existing root environment conventions.
 Coordinate database issue [#3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3)
 with telemetry issue [#9](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/9).
 They must not create competing dependency files or connection settings.
-Choose the Python version and exact database tooling through that work; this
-overview does not claim those decisions or commands are implemented.
+The existing database foundation uses Python 3.12, uv, SQLAlchemy and Alembic.
 
 ## Reuse telemetry across callers
 

@@ -1,109 +1,221 @@
-# Backend setup
+# Backend database setup
 
-The backend will use Python, FastAPI, and uv. uv will manage the project's
-Python version, virtual environment, dependencies, and locked dependency
-versions, so contributors do not need to manage a project environment with
-`pip` and `venv` separately.
+The database foundation uses **Python 3.12**, uv, SQLAlchemy Core, Psycopg 3,
+and Alembic. `backend/.python-version` selects the Python minor version;
+`backend/pyproject.toml` declares dependencies and `uv.lock` locks them.
+The verified interpreter was Python 3.12.10 on Windows. No FastAPI application
+or application endpoints are included yet.
 
-> **Current status:** The backend application and `pyproject.toml` have not
-> been scaffolded yet. You can install and verify uv now. The project commands
-> later in this guide will work after the backend foundation is added.
+## Prerequisites and uv
 
-## Prerequisites
+Follow [Docker](docker.md) and [PostgreSQL](postgresql.md). Use the existing
+root Compose project and root private `.env`; do not create another runtime
+PostgreSQL service, virtual-environment convention, or environment file format.
 
-- Git and a local clone of this repository.
-- Docker with Docker Compose.
-- The local PostgreSQL service described in [postgresql.md](postgresql.md).
-- uv.
+Install uv using one method:
 
-The supported Python version will be declared by the backend's
-`pyproject.toml` and `.python-version`. Do not select a different project
-version independently. uv can install the required Python version when the
-backend is initialized.
+- Windows: `winget install --id=astral-sh.uv -e`.
+- macOS with Homebrew: `brew install uv`.
+- Other supported methods: [official uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
-## Install uv
-
-Choose one installation method.
-
-### Windows
-
-Using WinGet:
-
-```powershell
-winget install --id=astral-sh.uv -e
-```
-
-Or use uv's official installer:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-### macOS and Linux
-
-Using uv's official installer:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Homebrew users may instead run:
-
-```bash
-brew install uv
-```
-
-Open a new terminal and verify the installation:
-
-```text
-uv --version
-```
-
-Review downloaded installation scripts before running them if required by your
-organization's security policy. See the [official uv installation guide][uv-install]
-for other supported installation methods.
-
-## Backend commands after scaffolding
-
-When `backend/pyproject.toml` and the FastAPI application exist, run these
-commands from the repository root.
-
-Install the declared Python version and synchronize dependencies:
+Open a new terminal and verify `uv --version`. From the repository root:
 
 ```text
 cd backend
-uv sync
+uv sync --locked
 ```
 
-Run the development API:
+uv uses the selected interpreter and local ignored `.venv`. If Python 3.12 is
+not installed, use `uv python install 3.12` before synchronization. Commit
+reviewed `pyproject.toml` and `uv.lock` together when publishing a change;
+never include `.venv` or a real `.env`.
+
+## Private connection settings
+
+Keep the existing `DATABASE_URL` variable in the private root `.env`. The
+loader reads that file without overwriting environment variables or files.
+The checked-in `.env.example` retains placeholders only. Do not copy it over
+an existing private file.
+
+Use a PostgreSQL URL for the intended host, port, database, username and
+password. Plain `postgresql://` is normalized internally to the Psycopg driver.
+Percent-encode reserved characters in credentials when composing a URL.
+Never paste the URL into GitHub, Discord, logs, or verification evidence.
+
+POSTGRES_* settings initialize Docker's database on an empty volume;
+DATABASE_URL chooses the backend connection. Editing either does not rename
+an existing database, change its password, or authorize a reset.
+
+## Preview before any application-schema changes
+
+The commands below are implemented and were verified on fresh disposable
+PostgreSQL 17. They have **not** been applied to the owner's development database.
 
 ```text
-uv run fastapi dev app/main.py
+uv run unshaken-db plan
 ```
 
-Run backend tests:
+This connects read-only to inspect PostgreSQL's major version and current
+Alembic revision, then prints only host, port, database, current revision,
+planned migration IDs, and a nonsecret target-confirmation token. It never
+prints credentials or a full connection string and does not create tables.
+
+For a fresh database the normal plan is:
+
+1. `0001_database_foundation`: 13 application tables, keys/indexes, checks,
+   timestamp/ownership/history/snapshot/measurement guards.
+2. `0002_master_records`: stable 8 categories and 11 body parts, including
+   explicit None and category measurement kinds.
+
+Alembic also owns its separate `alembic_version` tracking table. That is not
+a fourteenth application table.
+
+**For an existing/local/shared target, show the plan to its owner and obtain
+that target's approval first.** After approval of the displayed target and plan:
 
 ```text
-uv run pytest
+uv run unshaken-db upgrade --approve-target TOKEN_FROM_CURRENT_PLAN
 ```
 
-Apply database migrations:
+The command prints and rechecks the target/revision. A missing, wrong, or stale
+token exits without applying changes. On head it reports no pending work and
+does not recreate tables or duplicate seeds. Keep DATABASE_URL private and
+unchanged between preview and execution. Connection failures/conflicts exit
+with a safe message; investigate locally without sharing secrets.
+
+These commands do not create a PostgreSQL server/database, import ExerciseDB,
+start an API, call a model, or start observability. They create the approved
+application schema inside an already existing PostgreSQL 17 database.
+
+## Inspect the installed revision and master records
 
 ```text
-uv run alembic upgrade head
+uv run alembic current
+uv run alembic check
 ```
 
-The exact commands may be refined when the backend is scaffolded. At that
-point, this guide should be updated and every command should be verified on a
-fresh development environment.
+Both print a nonsecret target summary first. The second compares live schema
+against the metadata; it does not prove trigger behavior, which needs the
+integration tests. Direct Alembic upgrades also require target approval
+(`-x approve_target=TOKEN` before the subcommand). Prefer the wrapper above;
+never use raw commands to bypass target review.
 
-## Dependency rules
+Use pgAdmin or psql with your private settings for read-only checks:
 
-- Add runtime dependencies with `uv add <package>`.
-- Add development dependencies with `uv add --dev <package>`.
-- Commit both `pyproject.toml` and `uv.lock`.
-- Do not commit `.venv/`; it is machine-specific and ignored by Git.
-- Run project commands through `uv run` so they use the managed environment.
-- Do not place database passwords, AWS credentials, or API keys in source code.
+```sql
+SELECT id, name, sort_order, measurement_kind, is_active
+FROM exercise_categories ORDER BY sort_order;
+SELECT id, name, sort_order, is_active FROM body_parts ORDER BY sort_order;
+```
 
-[uv-install]: https://docs.astral.sh/uv/getting-started/installation/
+Migration #2 preserves unrelated records and accepts an exact existing seed
+match. A conflicting ID/name/order/value stops the migration without replacing
+custom data. Fix conflicts through a separately reviewed change; do not edit an
+already applied migration or reset the volume.
+
+## Testing without touching development data
+
+From `backend/`, the repeatable verification runner creates a uniquely labeled
+temporary PostgreSQL 17 container on a random loopback port, generates private
+test credentials in process memory, upgrades it from empty, runs the integration
+suite/schema-drift check, and removes only that test container:
+
+```text
+uv run python scripts/verify_database.py
+```
+
+The runner uses a 512 MiB temporary data filesystem and needs Docker access.
+It does not read the private development URL or attach any existing data volume.
+All test databases disappear when the disposable container is stopped. Run it
+only when this disposable test activity is intended.
+
+For a test server you have already prepared instead of using that runner:
+
+Integration tests require a **separate fresh disposable PostgreSQL 17 database**
+whose name begins `unshaken_foundation_test_`. Its connection is supplied in
+private process variable `TEST_DATABASE_URL`. Never point this variable at the
+shared or normal development database. The tests do not run provider/model calls.
+Some lifecycle tests create additional disposable databases on that same test
+server; this requires database-creation permission on the isolated test server.
+
+After approving/migrating the fresh test target to head, run from `backend/`:
+
+```text
+uv run pytest -q --tb=short
+```
+
+Set TEST_DATABASE_URL privately in your shell or task runner; do not put a real
+value in a checked-in example or command history shared with others. The tests
+use synthetic data and refuse non-test database names. They deliberately
+exercise invalid rows, concurrency and rejected deletes. A failing test must
+not be repaired by changing the development database.
+
+Rollback is destructive and kept separate from normal setup. It is refused
+unless the connected database has the disposable prefix and the private
+process flag `USC_ALLOW_DISPOSABLE_DOWNGRADE=1` is set. The test suite checks
+both refusal and successful downgrade/upgrade on newly created disposable data.
+Never enable that flag for a development/shared target.
+
+Limitations: downgrade removes this foundation and its test data. Seed removal
+can fail if records reference it, which safely aborts rollback; use fresh
+unreferenced disposable data for the lifecycle test. It is not an existing-data
+migration/recovery strategy, and application-history protection is not a backup.
+
+## Enforcement and current limits
+
+The database enforces source subtypes, ownership/lineage, weight pairs, required
+measurements, one active workout, atomic capture, completed-history immutability,
+source detachment, and timestamp chronology with constraints and triggers.
+Capture must insert initial rows and seal its snapshot in one transaction.
+See the [design](../database/design.md) for the JSON contract and deletion rules.
+
+`app.db.operations` supplies three internal primitives: seal capture, complete
+once with a stable server timer, and lock/check a template's captured version
+**before** a future optional-update mapping operation. Source-version comparison
+and mapping must use that transaction primitive; row guards alone cannot infer
+the exact mapping/retry behavior of a future API. Completed history is committed
+before that optional transaction. No workout API or template mapping is supplied.
+
+For this initial foundation, a transaction advisory lock serializes guarded
+writes, and deferred guards inspect the database state at transaction end.
+This favors clear correctness for local development over throughput. It needs
+load testing and equivalent concurrency protections before substantial API
+traffic. Do not remove guards to improve performance without replacement tests.
+A privileged database owner can still alter/disable schema protections;
+these guards are not authentication or a substitute for least-privilege roles.
+
+Package resources/migrations currently run from a repository checkout, not as a
+standalone deployed wheel. Runtime checks were on Windows/Docker Desktop;
+other operating systems were not exercised in this task. Shared telemetry and
+FastAPI remain separate implementation stories.
+
+## Local verification evidence
+
+Verified uncommitted working tree on `feature/database-foundation-local`, based
+on main `c42d624`. No commit or GitHub publication was made by this task.
+Environment: Python 3.12.10, PostgreSQL 17.11, Docker Engine 29.7.2 and Compose
+5.5.0 on Windows. Locked libraries include SQLAlchemy 2.0.55, Alembic 1.20.1
+and Psycopg 3.3.6.
+
+| Command | Result |
+|---|---|
+| `uv sync --locked` from backend | Dependency lock synchronized; 17 packages resolved/checked |
+| `uv run python scripts/verify_database.py` from backend | Fresh upgrade from base to `0002_master_records`; 74 integration tests passed; no schema drift; disposable server removed |
+| `uv run alembic current` on the disposable target | `0002_master_records (head)` |
+| `uv run alembic check` on the disposable target | No new upgrade operations detected |
+| `python -m unittest discover -s tests -v` from repository root | 8 existing tests passed |
+| `uv run --no-project python scripts/sync_agents.py --tool all --check` from repository root | 5 roles / 10 generated files checked; no drift |
+| `git diff --check` plus local documentation checks | Whitespace, local links, fences and diagram/dictionary synchronization checked |
+
+The integration suite includes rollback refusal without authorization, fresh
+disposable downgrade/upgrade, seed conflict rollback and custom-row preservation,
+actual FK rejection, source/ownership/lineage checks, three measurement kinds,
+concurrent active-slot/complete-once behavior, immutable capture, source deletion,
+TRUNCATE/delete/rewind rejection, terminal/event chronology, and safe target
+confirmation. These are live PostgreSQL checks, not mocked database results.
+No existing development tables/records were changed or real provider/model
+requests made. Database guards were exercised with synthetic data only.
+
+References: [SQLAlchemy constraints](https://docs.sqlalchemy.org/en/20/core/constraints.html),
+[Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html),
+[Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html).
