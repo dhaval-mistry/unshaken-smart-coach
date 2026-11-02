@@ -12,8 +12,8 @@ Team members using Codex or Claude Code can also configure the
 [reusable development agents](development-agents.md).
 
 The [observability setup guide](observability.md) describes the proposed local
-Grafana, Prometheus, Loki, Tempo and Collector setup. It is not runnable until
-the stack is implemented; see its linked architecture proposal for review.
+Grafana, Alloy, Mimir, Loki and Tempo setup. It is not runnable until the stack
+is implemented; see its linked architecture design for remaining decisions.
 
 The backend guide distinguishes current prerequisites from commands that will
 become available when the FastAPI application is scaffolded. Frontend setup
