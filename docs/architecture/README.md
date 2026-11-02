@@ -7,3 +7,4 @@ lives in the repository's root README.
 - [Local observability design](observability.md): approved Alloy collection and
   Mimir metrics direction with Grafana, Loki, Tempo and OpenTelemetry. Local
   storage mode and container-log scope remain open decisions.
+- [System overview](overview.md): planned components and folder responsibilities.
