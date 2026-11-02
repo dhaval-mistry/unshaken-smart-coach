@@ -3,11 +3,13 @@
 Design status: **Approved direction for local development**. The owner approved
 Alloy collection and Mimir metrics storage on 2026-11-02, then approved the
 local Mimir storage and initial application-log scope. The earlier design is
-retained below for context. Implementation and runtime verification remain pending.
+retained below for context. Local implementation and verification are described below.
 
-Implementation status: **Not started**. Root Compose defines PostgreSQL 17
-only. Database foundation code and migrations exist, but there is no FastAPI
-application, shared telemetry package, or observability stack yet.
+Implementation status: **Local stack, shared Python package and synthetic callers implemented**.
+Root Compose includes PostgreSQL 17 and an optional observability profile.
+Database foundation code, migrations and the shared telemetry package exist;
+product FastAPI endpoints remain future work. See the setup guide for evidence
+and deferred end-to-end verification.
 
 Related work: [#7](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/7)
 through [#11](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/11),
@@ -32,6 +34,13 @@ replication factor one and filesystem storage, without Kafka or MinIO. The
 initial stack will collect application logs through OpenTelemetry and Alloy;
 Docker container-log collection is deferred. The chosen Mimir image must be
 verified against this combination during implementation.
+
+The owner accepts possible monitoring-metric loss during a Mimir outage combined
+with an Alloy restart for this local version. The owner also deferred additional
+outage and retention cleanup tests and requested no further temporary groups.
+These checks are not reported as passed. Production durability and high
+availability require a separate design; PostgreSQL records are unaffected by
+this monitoring limitation.
 
 | Area | Previously approved | Current direction |
 |---|---|---|
@@ -66,7 +75,7 @@ distribution with Prometheus capabilities.
 | Grafana | Query the stores and show dashboards |
 | PostgreSQL | Application records; separate from telemetry |
 
-The proposed optional profile has five services: Alloy, Mimir, Loki, Tempo and
+The optional profile has five services: Alloy, Mimir, Loki, Tempo and
 Grafana. PostgreSQL remains the existing sixth service in the root project.
 
 ```mermaid
@@ -253,7 +262,7 @@ port overrides, and measured resource limits belong in the implementation PR.
 | `observability/grafana/dashboards/` | Reviewed dashboards |
 | `backend/app/telemetry/` | Shared Python SDK setup and helpers |
 
-Paths are proposed, not files created by this task. Do not build the earlier
+Dashboards remain future work. Do not build the earlier
 `observability/otel/` and `observability/prometheus/` configuration in parallel.
 Do not remove any existing implementation or data without inspecting it first.
 
@@ -274,8 +283,8 @@ Caller changes are mainly export settings: a container now targets
 `http://alloy:4318` instead of `http://otel-collector:4318`. The host loopback
 port can remain 4318. Keep SDK APIs, OTLP, W3C trace context, and safe log fields.
 Verify actual SDK log support and metric conversion for the pinned versions.
-No shared package exists yet, so this is implementation guidance, not a code
-migration already completed. Frontend TypeScript telemetry remains deferred;
+The shared Python package exists; individual FastAPI and database-script callers
+still need to initialize it. Frontend TypeScript telemetry remains deferred;
 SQL migrations never initialize Python telemetry.
 
 ## Retention, privacy, resources, and failures
@@ -314,7 +323,8 @@ Disable unneeded rule/alert features where supported; alerts remain out of scope
 
 ## Verification required during implementation
 
-No live checks below were performed by this documentation task.
+These checks define the wider implementation validation. See the setup guide
+for checks already performed and remaining limitations.
 
 | Layer | Evidence required |
 |---|---|
@@ -374,7 +384,4 @@ Exact compatible versions, verified probes, and measured resource limits are
 Developer choices within the approved design, not new product questions.
 
 Official Alloy, Mimir and Loki integration references were checked on 2026-11-02.
-The design uses documented
-integration paths; no images were downloaded or configurations run. A human
-may manually ask Product Owner to refine the affected stories before
-implementation. No role is started automatically.
+The setup guide records the selected image versions and partial runtime checks.

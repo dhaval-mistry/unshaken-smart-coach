@@ -6,6 +6,11 @@ and Alembic. `backend/.python-version` selects the Python minor version;
 The verified interpreter was Python 3.12.10 on Windows. No FastAPI application
 or application endpoints are included yet.
 
+The shared Python telemetry package and synthetic FastAPI/script examples are
+now available. Product endpoints remain separate work. See
+[telemetry examples](../../backend/examples/README.md) and
+[normal signal verification](observability.md#normal-local-verification).
+
 ## Prerequisites and uv
 
 Follow [Docker](docker.md) and [PostgreSQL](postgresql.md). Use the existing
@@ -186,7 +191,7 @@ these guards are not authentication or a substitute for least-privilege roles.
 
 Package resources/migrations currently run from a repository checkout, not as a
 standalone deployed wheel. Runtime checks were on Windows/Docker Desktop;
-other operating systems were not exercised in this task. Shared telemetry and
+other operating systems were not exercised in this task. API integration and
 FastAPI remain separate implementation stories.
 
 ## Local verification evidence

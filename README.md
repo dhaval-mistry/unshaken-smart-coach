@@ -6,7 +6,7 @@ UNShaken Smart Coach is a collaborative learning project built by participants i
 
 Our goal is to help users build fitness routines that fit their goals, experience, equipment, schedule, and dietary preferences.
 
-> **Project status: Planning and foundation.** This repository currently contains documentation and a starter `.gitignore`. The features, architecture, and roadmap below describe the intended direction. Application code, runnable setup instructions, automated checks, and deployment workflows will be added through the backlog.
+> **Project status: Foundation.** The repository includes local PostgreSQL migrations, the optional observability stack, shared Python OpenTelemetry helpers and synthetic API/script examples. Product APIs, frontend features and deployment remain planned. See the [setup guides](docs/setup/README.md) for current commands and limitations.
 
 ## 📑 Contents
 
@@ -189,7 +189,7 @@ Observability will help us answer practical questions:
 | Traces | Connected spans for API requests, database work, tool calls, and model calls |
 | Dashboards | Application health, external dependency performance, and AI workflow activity |
 
-OpenTelemetry will provide instrumentation. Grafana Alloy will collect and forward logs, metrics, and traces to Loki, Mimir, and Tempo; Grafana will display them. The stack is planned and not yet installed.
+The shared Python OpenTelemetry package provides instrumentation. Grafana Alloy collects and forwards logs, metrics, and traces to Loki, Mimir, and Tempo; Grafana displays them. See the [working synthetic examples](backend/examples/README.md) and [verification limits](docs/setup/observability.md).
 
 We will avoid logging raw prompts, dietary or health details, credentials, and other personal information. Logs and traces should use correlation identifiers that help troubleshoot without exposing user details.
 
@@ -235,7 +235,7 @@ Start from a clean working tree. If the fast-forward fails because your local `m
 
 ### Local application setup
 
-There is no runnable frontend or backend application in this repository yet. A Docker Compose configuration is available for the local PostgreSQL database. Runtime versions, application dependencies, database migrations, seed data, and launch commands will be documented as the foundation is implemented.
+The backend foundation includes database migrations and synthetic FastAPI/script telemetry examples. Product endpoints and the frontend remain planned. Follow the setup guides for the existing PostgreSQL service, master records, observability stack and example commands.
 
 Each participant will manage their own development environment, private configuration, and any cloud account they choose to use. The planned local setup should support sample data and mocked integrations so contributors can work without making paid model calls for every task.
 

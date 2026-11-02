@@ -19,7 +19,8 @@ The owner requested this documentation layout and shared-code guidance.
 The repository contains project/design/setup documents, agent definitions and
 their generator/tests, UI reference images, and a root Compose file defining
 PostgreSQL 17. The backend contains database migrations, schema and tests.
-There is no FastAPI or React application or working telemetry package yet.
+The shared Python telemetry package and synthetic FastAPI/script examples are
+implemented. Product API endpoints and React remain future work.
 
 ## Planned components
 
@@ -54,7 +55,7 @@ operation took. Logs must not contain the user's lifting weight or credentials.
 | `backend/scripts/` | Backend-specific Python commands that reuse application packages |
 | `scripts/` | Repository-wide helpers, such as the agent generator |
 | `observability/` | Collection/storage configuration and Grafana provisioning; not application Python code |
-| `compose.yaml` | Existing PostgreSQL and future optional local services |
+| `compose.yaml` | PostgreSQL and optional local observability services |
 | `tests/` | Cross-system tests and repository-tool tests |
 | `docs/` | Maintained designs, decisions, API descriptions, and setup guides |
 

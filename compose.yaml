@@ -19,5 +19,67 @@ services:
       timeout: 5s
       retries: 10
 
+  # The profile is optional. Explicit service names keep PostgreSQL independent.
+  alloy:
+    image: grafana/alloy:v1.8.3
+    profiles: [observability]
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy", "/etc/alloy/config.alloy"]
+    ports:
+      - "127.0.0.1:${ALLOY_OTLP_PORT:-4318}:4318"
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy
+    mem_limit: 512m
+
+  mimir:
+    image: grafana/mimir:2.15.0
+    profiles: [observability]
+    # Explicitly select classic ingestion; this local mode does not need Kafka.
+    command: ["-config.file=/etc/mimir/mimir.yaml", "-ingest-storage.enabled=false"]
+    volumes:
+      - ./observability/mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir_data:/data
+    mem_limit: 1g
+
+  loki:
+    image: grafana/loki:3.4.3
+    profiles: [observability]
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      # Image /tmp permissions let the non-root service write a new volume.
+      - loki_data:/tmp
+    mem_limit: 512m
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    profiles: [observability]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/tmp
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    profiles: [observability]
+    # Refuse to start with missing credentials, without blocking PostgreSQL.
+    entrypoint: ["/bin/sh", "-ec", "test -n \"$$GF_SECURITY_ADMIN_USER\" && test -n \"$$GF_SECURITY_ADMIN_PASSWORD\" || { echo 'Set private Grafana credentials in .env'; exit 1; }; exec /run.sh"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    mem_limit: 512m
+
 volumes:
   postgres_data:
+  alloy_data:
+  mimir_data:
+  loki_data:
+  tempo_data:
+  grafana_data:

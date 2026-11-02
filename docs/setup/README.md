@@ -11,9 +11,8 @@ Follow these guides in order:
 Team members using Codex or Claude Code can also configure the
 [reusable development agents](development-agents.md).
 
-The [observability setup guide](observability.md) describes the proposed local
-Grafana, Alloy, Mimir, Loki and Tempo setup. It is not runnable until the stack
-is implemented; see its linked architecture design for remaining decisions.
+The [observability setup guide](observability.md) describes the optional local
+Grafana, Alloy, Mimir, Loki and Tempo stack and its verification limits.
 
 Before coding, follow the [developer reading path](../README.md) and review the
 relevant designs in the [architecture index](../architecture/README.md).

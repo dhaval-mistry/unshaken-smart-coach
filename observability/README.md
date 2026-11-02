@@ -1,13 +1,12 @@
 # Observability
 
-Future Grafana Alloy, Mimir, Loki, Tempo, and Grafana configuration will live
-here as those capabilities are introduced. OpenTelemetry remains the shared
+Grafana Alloy, Mimir, Loki, Tempo, and Grafana configuration lives here.
+OpenTelemetry remains the shared
 application instrumentation; Alloy collects and forwards its signals.
 
 Keep runnable configurations here and human instructions under `docs/`:
 
 - [Architecture design](../docs/architecture/observability.md)
-- [Planned local setup](../docs/setup/observability.md)
+- [Local setup and verification limits](../docs/setup/observability.md)
 
-No component configuration exists yet. The proposed services will use an
-optional profile in the existing root Compose file, preserving PostgreSQL.
+The services use an optional profile in the root Compose file, preserving PostgreSQL.

@@ -1,0 +1,86 @@
+// Receive only application OTLP. Docker logs are deliberately not collected.
+otelcol.receiver.otlp "applications" {
+  http { endpoint = "0.0.0.0:4318" }
+  output {
+    logs = [otelcol.processor.memory_limiter.guard.input]
+    metrics = [otelcol.processor.memory_limiter.guard.input]
+    traces = [otelcol.processor.memory_limiter.guard.input]
+  }
+}
+
+// Bound collector memory before batching; exporters retry independently.
+otelcol.processor.memory_limiter "guard" {
+  check_interval = "1s"
+  limit = "350MiB"
+  output {
+    logs = [otelcol.processor.attributes.redact.input]
+    metrics = [otelcol.processor.attributes.redact.input]
+    traces = [otelcol.processor.attributes.redact.input]
+  }
+}
+// Remove common secret fields as defense in depth. Callers must also avoid
+// putting sensitive values in log bodies, resource fields, or unknown keys.
+otelcol.processor.attributes "redact" {
+  action {
+    key = "password"
+    action = "delete"
+  }
+  action {
+    key = "authorization"
+    action = "delete"
+  }
+  action {
+    key = "token"
+    action = "delete"
+  }
+  action {
+    key = "db.statement"
+    action = "delete"
+  }
+  output {
+    logs = [otelcol.processor.batch.signals.input]
+    metrics = [otelcol.processor.batch.signals.input]
+    traces = [otelcol.processor.batch.signals.input]
+  }
+}
+otelcol.processor.batch "signals" {
+  timeout = "5s"
+  send_batch_size = 512
+  output {
+    logs = [otelcol.exporter.otlphttp.loki.input]
+    metrics = [otelcol.exporter.prometheus.mimir.input]
+    traces = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+// Loki's base path is /otlp; the exporter adds /v1/logs.
+otelcol.exporter.otlphttp "loki" {
+  client { endpoint = "http://loki:3100/otlp" }
+  sending_queue { queue_size = 128 }
+  retry_on_failure { max_elapsed_time = "2m" }
+}
+otelcol.exporter.otlphttp "tempo" {
+  client { endpoint = "http://tempo:4318" }
+  sending_queue { queue_size = 128 }
+  retry_on_failure { max_elapsed_time = "2m" }
+}
+// Conversion keeps one metrics ingestion path; there is no Prometheus server.
+otelcol.exporter.prometheus "mimir" {
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+    queue_config {
+      capacity = 2000
+      max_shards = 4
+      max_samples_per_send = 500
+      sample_age_limit = "1h"
+    }
+  }
+  wal {
+    truncate_frequency = "1h"
+    min_keepalive_time = "5m"
+    max_keepalive_time = "1h"
+  }
+}
