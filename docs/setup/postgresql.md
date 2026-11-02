@@ -6,7 +6,9 @@ Do not install a second PostgreSQL server for this project.
 
 Starting the service initializes the configured development database only when
 its data volume is empty. It does **not** create application tables, install
-master records, or run migrations. Those are separate database stories.
+master records, or run migrations. The local migration tooling for stories #3
+and #4 is described in [backend setup](backend.md). Review and approve the
+specific target before applying it to an existing development database.
 
 ## Prepare private settings without overwriting them
 

@@ -1,5 +1,5 @@
 erDiagram
-    %% Technical proposal for review; not migration approval.
+    %% Reviewed PR17 design; local migration implementation, not applied to owner database.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.

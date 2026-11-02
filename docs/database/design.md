@@ -1,10 +1,11 @@
 # UNShaken Smart Coach: database design
 
-Design status: **DRAFT FOR HUMAN REVIEW**. Product answers below are confirmed;
-the concrete schema, snapshot, deletion guards, and measurement representation
-in this revision are technical proposals awaiting review of issue #2's draft PR.
+Design basis: **Reviewed and merged through PR #17**, followed by the owner's
+instruction to implement stories #3 and #4 against that design. Confirmed
+product answers are retained below; remaining API decisions stay deferred.
 
-Implementation status: **No application schema or migrations yet**. PostgreSQL
+Implementation status: **Local SQLAlchemy/Alembic implementation under verification**.
+It has not been applied to the owner's existing database. PostgreSQL
 17 setup was merged through [PR #16](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/16).
 This revision starts from main `9b38ce9cdcad468a8a2cac302125c4c346523adc`.
 It does not connect to or change any database.
@@ -13,8 +14,8 @@ Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-sma
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
 and [master records #4](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/4).
 The owner already approved these stories and their master-record lists. Do not
-ask for the same story approval again. Review of this concrete design is still
-needed before the migration contract is final.
+ask for the same story approval again. See [PR #17](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/17)
+and the verified-command/status section in [backend setup](../setup/backend.md).
 
 ## Confirmed requirements and owner answers
 
@@ -52,8 +53,8 @@ conversation on 2026-11-01:
 | Delete live exercise/template/planned-set sources | Permanent deletion is allowed while workout history is preserved |
 | Delete completed workouts or completed sets | No permanent-delete feature in version one; correction/deletion needs later design |
 
-These answers approve behavior, not an unseen SQL implementation. The draft
-PR records them for review. It does not grant a sample-administration role,
+These answers approve behavior, not an unseen SQL implementation. Merged
+PR #17 records them. They do not grant a sample-administration role,
 account-erasure workflow, or permission to erase retained history.
 
 ## Model and initial scope
@@ -69,17 +70,16 @@ the dictionary below is one physical column. Paired names such as created_at
 and updated_at are separate columns.
 
 Existing choices remain: root Compose PostgreSQL 17, private root environment
-conventions, and one backend uv project. Issue #3 selects a supported Python
-version and uses SQLAlchemy/Alembic unless repository implementation has
-established another standard by then. No tooling command is claimed runnable
-before that tooling is created.
+conventions, and one backend uv project. The local implementation selects
+Python 3.12, SQLAlchemy Core, Psycopg 3, and Alembic. Only commands verified
+against disposable PostgreSQL are described as working in the setup guide.
 
-### Measurement representation proposed for review
+### Measurement representation
 
 Store whole seconds and meters; decimal meter values allow millimeter
 precision. For example, ten minutes and 1.5 km become 600 seconds and
-1500.000 meters. These canonical units are an engineering recommendation;
-preserving a user's entered display unit is not part of this schema proposal.
+1500.000 meters. These canonical units follow the merged design;
+preserving a user's entered display unit is not part of this schema.
 
 `exercise_categories.measurement_kind` separates behavior from an editable
 display label. Capture it in each session exercise. A later category-name
@@ -96,8 +96,8 @@ reps. Targets may be NULL while editing; populated targets/actual values are
 positive. Completion uses actuals, never silently copies targets. Weight/unit
 pairs stay optional and independent for every kind. Rest may be zero.
 
-The NULL rules and canonical units are technical representation choices for
-the draft review. They do not approve target-readiness rules for a future
+The NULL rules and canonical units are technical representation choices from
+the merged design. They do not approve target-readiness rules for a future
 start-workout API or add optional cross-category measurement features.
 
 ## Table dictionary
@@ -300,11 +300,11 @@ Unique (session_id, position). At capture/insertion, validate a real accessible 
 
 | Column | PostgreSQL type | Rules and meaning |
 |---|---|---|
-| id | UUID | Primary key; never reuse a deleted set UUID. |
+| id | UUID | Primary key; generate a fresh UUID for new rows; retained initial UUIDs cannot be reused. |
 | session_exercise_id | UUID | Required FK session_exercises. |
 | source_template_set_id | UUID | Nullable live FK template_sets; SET NULL after planned-source deletion. |
 | source_template_set_id_snapshot | UUID | Nullable immutable original planned-set UUID; not an FK. |
-| set_number | INTEGER | Required; positive; unique per session exercise; never reuse a removed number. |
+| set_number | INTEGER | Required; positive; unique per session exercise; additions follow retained initial/existing numbers. No extra ledger tracks discarded post-start unperformed additions. |
 | target_reps_snapshot | INTEGER | Nullable immutable starting reps; positive when supplied; reps kind only. |
 | target_duration_seconds_snapshot | INTEGER | Nullable immutable starting duration; positive whole seconds; duration/duration_distance kinds. |
 | target_distance_meters_snapshot | NUMERIC(12,3) | Nullable immutable starting distance; positive meters; duration_distance kind only. |
@@ -483,11 +483,11 @@ including when the live exercise is gone. Whether history matching uses all
 workouts, only a template, or repeated-exercise occurrences remains open.
 Do not store a stale previous_weight copy or silently relabel kg as lb.
 
-## Permanent deletion while preserving history: proposed mechanics
+## Permanent deletion while preserving history
 
 Permanent source deletion is allowed; mandatory archiving/RESTRICT against all
 historical references is no longer the design. The following mechanics are
-proposals for review, not an assertion that every deletion operation exists.
+implemented in the local database guards, not as application deletion APIs.
 
 | Relationship or operation | Proposed behavior |
 |---|---|
@@ -579,6 +579,14 @@ deferred constraint triggers where complete transaction state is needed.
 | Timestamp maintenance | Server defaults and update trigger; preserve created_at and event timestamps rather than trusting caller-updated updated_at |
 | Source deletion and later UUID reuse | Exact SET NULL detachment with originals retained; reject forged orphan capture/reassignment, mixed historical edits, or reinserted source IDs that would impersonate retained history |
 
+Local implementation details: ordinary row checks/FKs and BEFORE/deferred
+triggers implement these guards. A transaction advisory lock currently
+serializes foundation writes, and deferred validation inspects complete stored
+state; this is a correctness-first local baseline, not a throughput claim.
+The locked optional-update primitive checks the captured source version before
+future mapping writes; no mapping or retry API is implemented. TRUNCATE is
+rejected by statement guards, but a privileged schema owner can alter guards.
+
 Database guards validate stored relationships; they are not authentication and
 do not grant a user permission to issue arbitrary SQL. A privileged database
 owner can alter/disable schema protections; application access control and least
@@ -632,20 +640,19 @@ No API implementing those behaviors is included in #3/#4. If their later
 agreement changes fields or guards, add a new migration; do not rewrite the
 initial migration or pretend this document settled the product rule.
 
-Human review of this **technical proposal** must still assess canonical units
-and unused-field NULL rules, one-time JSON capture/deferred validation, nullable
-live links/original UUIDs, live-plan deletion prerequisites, and the exact
-unperformed-row removal boundary. These are the concrete review points, not a
-request to approve the already approved stories again. This draft does not
-close issue #2 or mark #3 ready automatically.
+PR #17 supplied the reviewed representation for canonical units, unused-field
+NULL rules, one-time JSON capture, original UUIDs/live links, and deletion
+boundaries. The owner subsequently requested local implementation of #3/#4.
+Review the local code and verification evidence before publishing; no further
+approval of the same master values or confirmed product rules is being requested.
 
 ## Verification and handoff for migration implementation
 
-No SQL, migrations, application code, tests, infrastructure, or database changes
-are part of this documentation task. Diagrams/dictionary must stay synchronized.
-Issue #3 will create the tooling and verify the complete design on disposable
-PostgreSQL 17; issue #4 installs the approved master values through versioned
-data migration and verifies stable IDs, counts/order/kinds, and repeat execution.
+The local implementation adds SQLAlchemy metadata, frozen Alembic schema/guard
+SQL, a separate versioned master-data migration, target confirmation tooling,
+and PostgreSQL integration tests. Diagrams/dictionary stay synchronized.
+Verification runs only on disposable PostgreSQL 17. The owner's development
+database is not migrated by this work. Publication remains the owner's action.
 
 Required future evidence includes fresh upgrade, all keys/indexes/guards,
 invalid rows and concurrent active-workout attempts, measurement boundaries,
@@ -663,6 +670,6 @@ Logs/metrics/traces use shared telemetry and the maintained observability
 design. Do not store telemetry in these tables or log weights, measurements,
 notes, tokens, raw snapshots, SQL parameters, or credentials.
 
-Review this draft PR first. Then a human separately starts the Developer for
-#3 and afterward #4. No role handoff or implementation starts automatically.
+Review the local code and validation results before publishing. No role is
+invoked automatically, and no changes are committed or pushed by this task.
 

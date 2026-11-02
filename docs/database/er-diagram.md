@@ -1,9 +1,8 @@
 # UNShaken database ER diagram
 
-Design status: **Technical proposal for human review**; see the
-[detailed design](design.md) for confirmed owner answers and proposed mechanics.
-The model retains 13 tables. No schema/migration/runtime implementation is
-included in this diagram.
+Design basis: **Reviewed PR #17**, followed by local implementation of stories
+#3/#4. See the [detailed design](design.md) and [setup guide](../setup/backend.md).
+The model retains 13 tables. The owner's existing database is not migrated.
 
 This diagram shows live foreign keys. Immutable original UUID columns
 intentionally are not FKs: source deletion may clear a live link while its
@@ -25,7 +24,7 @@ deletion, chronology or immutability guards; the design explains them.
 
 ```mermaid
 erDiagram
-    %% Technical proposal for review; not migration approval.
+    %% Reviewed PR17 design; local migration implementation, not applied to owner database.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
