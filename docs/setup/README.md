@@ -11,9 +11,10 @@ Follow these guides in order:
 Team members using Codex or Claude Code can also configure the
 [reusable development agents](development-agents.md).
 
-The [observability setup guide](observability.md) describes the approved local
-Grafana, Prometheus, Loki, Tempo and Collector direction. It is not runnable
-until the stack is implemented and tested.
+The [observability setup guide](observability.md) describes the proposed local
+Grafana, Alloy, Mimir, Loki, and Tempo revision while preserving OpenTelemetry.
+The design records the earlier Collector/Prometheus approval. The revision
+needs approval, implementation, and testing before it is runnable.
 
 Before coding, follow the [developer reading path](../README.md). Setup guides
 explain how to run tools; product rules and design choices live in the

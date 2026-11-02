@@ -133,7 +133,8 @@ Readiness does not certify all 13 tables, every constraint, or that migrations
 are at head. The separate migration command and database verification must
 prove those. No startup or health handler runs migrations, creates tables, or
 inserts missing seeds. Neither health endpoint depends on ExerciseDB, AI
-services, Grafana, Loki, Prometheus, or Tempo.
+services, Alloy, Grafana, Loki, Mimir, or Tempo. This remains true whether the
+earlier Collector/Prometheus plan or the proposed Alloy/Mimir revision is used.
 
 ## Load choices for the New exercise form
 
@@ -218,8 +219,13 @@ or connect to PostgreSQL merely by importing a route module.
 
 ## Logs, metrics, and traces
 
-Use `app.telemetry` as described in the approved observability design. Route
-handlers must not send directly to Loki, Prometheus, or Tempo.
+Use `app.telemetry` as described in the
+[observability design](../architecture/observability.md). Its earlier shared
+OpenTelemetry boundary remains; the Alloy/Mimir revision is proposed. After
+approval, the shared SDK sends OTLP to Alloy, which forwards logs to Loki,
+metrics to Mimir, and traces to Tempo. Route handlers must not configure direct
+store exporters or add a second metric ingestion path. Preserve all HTTP,
+lookup-data, and database-readiness rules in this API proposal.
 
 - Record route template, method, HTTP status, duration, and safe failure code.
 - Correlate logs with request ID and trace/span IDs when a trace exists.
@@ -247,6 +253,7 @@ These are future checks, not results from this documentation task:
 | Unexpected error | No SQL, credentials, input, or stack trace in response; safe correlated server evidence |
 | Repeated reads | Row counts and seed IDs remain unchanged; no writes or external provider/model calls occur |
 | Telemetry enabled and unavailable | Synthetic successful/failed lookup signals are discoverable when enabled; exporter outages leave API results unchanged |
+| Proposed Alloy/Mimir revision, after approval | Lookup metrics are queried from Mimir through Grafana; Alloy or store outages do not change lookup/liveness/database-readiness results; logs still link to Tempo traces |
 | Generated API documentation | OpenAPI matches approved paths, schemas, statuses, and headers; examples match tests |
 
 Use backend unit/HTTP tests for response behavior and a fresh disposable

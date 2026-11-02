@@ -1,102 +1,157 @@
 # Local observability setup
 
-Status: **PLANNED, NOT RUNNABLE YET**. Root Compose currently defines PostgreSQL
-only. This guide describes the setup to implement from the approved local
-[observability design](../architecture/observability.md). It does not install
-or configure the stack today.
+Status: **PLANNED, NOT RUNNABLE YET**. The Alloy/Mimir revision is
+**proposed for approval**, not an installed stack. Root Compose still defines
+PostgreSQL only. This guide contains no claim that the future commands work.
 
-## What the tools do
+Read the [design and approval record](../architecture/observability.md).
+The earlier approved plan used a standalone Collector and Prometheus. The
+proposed replacement keeps OpenTelemetry in application code and uses Alloy
+for collection plus Mimir for metrics storage. Do not mix the two service lists.
 
-- Grafana: one place to explore dashboards, logs and traces.
-- Prometheus: numbers such as request count and response time.
-- Loki: structured application logs.
-- Tempo: connected steps showing where an operation spent time.
-- OpenTelemetry Collector: receives and routes those signals.
+## What will run
 
-All five are intended to run as Docker containers. Contributors should not
-need to install each component directly on their computer or create a paid
-cloud account for this local setup.
+| Service | Purpose |
+|---|---|
+| Alloy | Receive application OpenTelemetry logs, metrics, and traces; forward them |
+| Mimir | Store metrics; answer Grafana's PromQL queries |
+| Loki | Store logs |
+| Tempo | Store traces |
+| Grafana | Explore all three stores |
+
+These are proposed containers in the existing root Compose project's optional
+`observability` profile. PostgreSQL stays independent. The recommended local
+Mimir variant is one process, classic ingestion, and filesystem storage, with
+no extra Kafka or MinIO container. This choice needs owner approval and
+version-specific runtime verification; see the design's storage discussion.
 
 ## Prerequisites available today
 
-1. Follow the existing [Docker installation guide](docker.md).
-2. Use the repository root and the existing private `.env` convention. If `.env`
-   already exists, do not overwrite it with `.env.example`.
-3. Review the architecture proposal. No observability environment variables or
-   passwords have been added to the current template by this task.
+1. Follow the existing [Docker guide](docker.md).
+2. Use the repository root and existing private `.env` convention. Do not
+   overwrite a personal `.env` with `.env.example`.
+3. Review the design, record approval, and update existing stories #7-#15
+   through the separately requested Product Owner workflow.
+4. During implementation, select fixed compatible images, writable data paths,
+   and private Grafana credentials. Commit placeholders only. No observability
+   configuration/settings were added by this documentation task.
+
+A backend is not required to verify the stack using clearly labeled synthetic
+signals. A healthy stack alone does not instrument an application.
 
 ## Planned startup after implementation
 
-The following commands are **proposed, not currently working commands**. Run
-them only after the service definitions and configurations have been added and
-the implementing PR replaces this notice with verified instructions:
+**Proposed and unverified. These commands do not work with current Compose.**
+Use them only after implementation replaces this notice with tested instructions.
 
 ```text
-docker compose --profile observability up -d otel-collector prometheus loki tempo grafana
+docker compose --profile observability up -d alloy mimir loki tempo grafana
 docker compose --profile observability ps
-docker compose --profile observability logs --tail 100 otel-collector prometheus loki tempo grafana
+docker compose --profile observability logs --tail 100 alloy mimir loki tempo grafana
 ```
 
-Use the existing root Compose project; do not start a second PostgreSQL service.
-The optional stack must be usable with synthetic telemetry before a backend
-exists. Starting containers alone does not provide application telemetry.
+Start only the listed services. Do not recreate PostgreSQL, migrate it, or
+reset a volume as a side effect. Review logs locally and redact secrets before
+sharing them. Do not print expanded Compose/configuration as evidence.
 
-## Planned access and connections
+## Planned access and signal destinations
 
 | Client | Proposed destination |
 |---|---|
-| Browser | Grafana at `http://localhost:3000` |
-| Backend on your computer | Collector OTLP HTTP at `http://localhost:4318` |
-| Backend in the Compose network | Collector OTLP HTTP at `http://otel-collector:4318` |
-| Grafana containers | Internal Prometheus, Loki, and Tempo service URLs |
+| Browser | Grafana `http://127.0.0.1:3000` |
+| Python process on host | Alloy OTLP HTTP base `http://127.0.0.1:4318` |
+| Python process in Compose | Alloy OTLP HTTP base `http://alloy:4318` |
+| Alloy metrics export | Mimir remote write `http://mimir:9009/api/v1/push` |
+| Alloy log export | Loki native OTLP base `http://loki:3100/otlp` |
+| Alloy trace export | Tempo OTLP HTTP base `http://tempo:4318` |
+| Grafana Mimir data source | Prometheus type, base `http://mimir:9009/prometheus` |
+| Grafana Loki data source | `http://loki:3100` |
+| Grafana Tempo data source | `http://tempo:3200` |
+| Alloy diagnostics inside Compose | `http://alloy:12345` |
 
-The Collector base endpoint is protocol-specific: SDKs may append `/v1/traces`,
-`/v1/metrics`, or `/v1/logs` for OTLP HTTP. The implementation must document the
-selected SDK settings, protocol and full-path behavior rather than blindly
-reusing an endpoint for OTLP gRPC.
+Only Grafana 3000 and Alloy 4318 are proposed as host loopback bindings.
+Mimir, Loki, Tempo, Alloy administration, and gRPC remain internal. A
+container's localhost points to itself, not another service.
 
-Grafana credentials will come from private local configuration, with placeholders
-only in `.env.example`. Do not assume a checked-in default password. Data sources
-and reviewed dashboards should be provisioned automatically, so every developer
-does not have to configure three connections by hand.
+The shared Python package still exports all signals using OpenTelemetry.
+Document the actual SDK protocol and base/per-signal endpoint settings:
+HTTP paths are `/v1/logs`, `/v1/metrics`, and `/v1/traces`.
+Do not send HTTP traffic to a gRPC port or append a signal path twice.
+The complete routing and source references live in the
+[design](../architecture/observability.md#components-and-signal-flow).
 
-## Verification required before this guide is called runnable
+Provision all Grafana data sources and log-to-trace links automatically.
+Use private Grafana credentials with anonymous access disabled. The proposed
+stores are single-tenant inside a trusted local network; they are not secure
+public services. Remote/shared use needs a separate access design.
 
-- The chosen image versions and readiness checks work on the supported machine.
-- Grafana data sources connect successfully over the Compose network.
-- Synthetic metrics, logs and traces reach their respective stores through the
-  Collector, and a log's trace ID opens the matching trace.
-- A future backend exports real instrumented operations through the shared
-  telemetry package; synthetic traffic is clearly identified.
-- Stopping/restarting the stack preserves its intended local data and does not
-  stop, recreate, migrate, or modify the PostgreSQL database.
-- Sensitive fields are absent, queues/resource usage are bounded, and retention
-  settings actually remove old data as designed.
+## Application logs and container logs
+
+The proposed default uses application logs sent through OpenTelemetry.
+Console logging remains available locally, but Alloy must not also collect
+those same entries through Docker.
+
+No Docker socket or host-log mount is needed in the initial setup. Docker
+container-log discovery is deferred. If later approved, document the exact
+container allowlist, platform-specific daemon permissions, duplicate prevention,
+read positions, and safe restart behavior before enabling it. A read-only
+socket mount does not restrict Docker API actions.
+
+## Verification before calling this guide runnable
+
+Record selected versions, tested commit, exact commands, results, safe queries,
+and limitations in the implementation PR, then replace planned instructions.
+
+| Step | What must be demonstrated |
+|---|---|
+| Validate configuration | Version-specific config parsing and Compose wiring; no secrets printed |
+| Check each service | Working probes for Grafana `/api/health`, Loki/Mimir/Tempo `/ready`, Alloy `/-/ready` and `/-/healthy` |
+| Send synthetic data | A known counter/histogram, safe log event, and matching trace reach the stores |
+| Query through Grafana | Metric is queried from Mimir, log from Loki, trace from Tempo; log opens the correct trace |
+| Check failures | Stop Alloy or each store separately using disposable telemetry; application/script result remains correct and waits are bounded |
+| Check recovery | New signals arrive after recovery; document buffered versus dropped data |
+| Check storage | Restart services and verify intended store data/Alloy remote-write state; measure disk and memory use |
+| Check retention | Three-day metrics/log and 24-hour trace policy; actual cleanup verified with disposable telemetry and documented delays |
+| Check PostgreSQL isolation | Observability start/stop/restart leaves PostgreSQL running and data unchanged |
+| Check real callers later | #10 verifies examples; #15 verifies actual lookup requests; separate live evidence from mocks |
+
+Alloy readiness means its initial configuration loaded; it does not prove
+signals reached storage. Probes must work with the chosen images; do not
+assume they contain curl or a shell. Never treat an empty Grafana dashboard as
+proof of either a broken stack or a working application.
 
 ## Planned stop command
 
-After implementation, stop only these services to preserve database isolation:
+**Proposed and unverified; available only after implementation:**
 
 ```text
-docker compose --profile observability stop grafana tempo loki prometheus otel-collector
+docker compose --profile observability stop grafana tempo loki mimir alloy
 ```
 
-Do not use `docker compose down -v` as routine troubleshooting; it can delete
-the project's database volume as well as telemetry data. Data deletion requires
-a separate, explicitly approved operation targeting exact disposable volumes.
+This targets only observability. Stopping preserves volumes; deleting data is
+a separate operation requiring approval for exact disposable targets. Do not
+use `docker compose down -v` as routine setup or troubleshooting.
 
-## Troubleshooting checklist for the implemented stack
+## Troubleshooting for the future implementation
 
-- Port already occupied: inspect the conflicting local service and the documented
-  port override; do not stop an unrelated application without approval.
-- No telemetry: distinguish missing instrumentation, unhealthy Collector,
-  wrong endpoint/protocol, and failed storage connections.
-- A container's `localhost` points to itself; use Compose service names between
-  containers and published loopback ports from the host.
-- Grafana connects but shows no data: check time range, service name, synthetic
-  traffic generation, and whether queries match provisioned metrics/labels.
-- Collector logs show dropped data: check queues, memory limits and store
-  availability; do not log raw payloads or secrets to debug the problem.
+- No metrics: inspect Alloy conversion/remote-write errors and Mimir readiness.
+  Mimir is the store; there is no separate Prometheus server or old 8889 scrape
+  endpoint in this proposal.
+- Empty metric query: verify the Grafana Prometheus-type data source uses the
+  Mimir `/prometheus` prefix and the actual converted metric name/time range.
+- Logs rejected: check Loki structured metadata/schema support and the native
+  `/otlp/v1/logs` destination.
+- Missing traces: distinguish Tempo ingestion 4318 from its query port 3200.
+- Duplicate logs: check whether the same application stream is exported by
+  both its SDK and Docker log collection.
+- Growing disk: inspect remote-write backlog, Mimir WAL/blocks/compactor,
+  Loki/Tempo retention, and cleanup delays. Retention is not a hard disk quota.
+- Store unavailable: inspect safe error counters and queue/drop behavior.
+  Do not log raw telemetry payloads, credentials, or sensitive SQL to debug it.
+- Grafana healthy but no data: check delivery and queries separately; verify
+  synthetic service labels and log-to-trace data-source links.
+- A selected Mimir image requires extra infrastructure: stop and revisit the
+  design; do not silently add Kafka, object storage, or a cloud account.
 
-Record exact commands and results in the implementation PR. No startup,
-readiness, ingestion, retention or browser checks have been run for this draft.
+No containers were started, probes run, telemetry delivered, or retention
+measured by this design task. This guide remains planned.

@@ -3,6 +3,10 @@
 Design status: **Agreed direction**. Detailed product rules remain governed by
 their own design approvals and open questions.
 
+The [Alloy/Mimir observability revision](observability.md) is **proposed**, not
+approved. Its collection/storage choices in the diagram below await owner
+review; the earlier Collector/Prometheus approval is recorded in that design.
+
 Implementation status: **Application not started**. This document does not
 create application code, packages, services, or database tables.
 
@@ -29,7 +33,7 @@ flowchart LR
     API --> Telemetry["Shared Python telemetry"]
     Service --> Telemetry
     Script["Python database scripts"] --> Telemetry
-    Telemetry --> Collector["OpenTelemetry Collector"]
+    Telemetry --> Alloy["Collection service: Alloy proposed"]
 ```
 
 The frontend does not access PostgreSQL directly. The backend checks ownership
@@ -50,7 +54,7 @@ operation took. Logs must not contain the user's lifting weight or credentials.
 | `backend/app/telemetry/` | Shared Python log/metric/trace setup and helpers |
 | `backend/scripts/` | Backend-specific Python commands that reuse application packages |
 | `scripts/` | Repository-wide helpers, such as the agent generator |
-| `observability/` | Collector and Grafana-stack configuration, not application Python code |
+| `observability/` | Collection/storage configuration and Grafana provisioning; Alloy/Mimir revision proposed; not application Python code |
 | `compose.yaml` | Existing PostgreSQL and future optional local services |
 | `tests/` | Cross-system tests and repository-tool tests |
 | `docs/` | Maintained designs, decisions, API descriptions, and setup guides |

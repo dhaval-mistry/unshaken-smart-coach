@@ -8,7 +8,7 @@ Use this index to find the design for a story before changing code. Read the
 | [System overview](overview.md) | Components, folders, and shared-code boundaries | Agreed direction; feature details follow their own approvals | Application not started |
 | [Database design](../database/design.md) | Tables, relationships, ownership, and history | Draft with confirmed rules and remaining decisions; see issue #2 | No migrations or models yet |
 | [Database diagrams](../database/README.md) | Matching Mermaid source and rendered diagram | Follow the database design status | Documentation only |
-| [Observability design](observability.md) | Shared telemetry, Collector, metrics, logs, and traces | Local approach and retention approved; see issues #7-#11 | Stack and shared package not started |
+| [Observability design](observability.md) | Shared OpenTelemetry, Alloy, Mimir, Loki, Tempo, and Grafana | Alloy/Mimir revision proposed; earlier Collector/Prometheus approval and retention retained in the record; see issues #7-#15 | Stack and shared package not started |
 | [Initial API design](../api/foundation.md) | User actions, health checks, form choices, and response rules | Proposed for review; access policy and scope need approval | No application endpoints yet |
 
 ## Keeping designs useful
