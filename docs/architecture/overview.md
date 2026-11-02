@@ -3,8 +3,9 @@
 Design status: **Agreed direction**. Detailed product rules remain governed by
 their own design approvals and open questions.
 
-The [Alloy/Mimir observability direction](observability.md) is approved. Local
-Mimir storage mode and container-log collection remain open decisions.
+The [Alloy/Mimir observability direction](observability.md) is approved, including
+local Mimir filesystem storage and initial application-only log collection.
+Docker container-log collection is deferred.
 
 Implementation status: **Application not started**. This document does not
 create application code, packages, services, or database tables.

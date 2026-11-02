@@ -6,7 +6,8 @@ lives in the repository's root README.
 
 - [Local observability design](observability.md): approved Alloy collection and
   Mimir metrics direction with Grafana, Loki, Tempo and OpenTelemetry. Local
-  storage mode and container-log scope remain open decisions.
+  single-process filesystem storage and application-only log collection are approved;
+  implementation remains pending.
 - [System overview](overview.md): planned components and folder responsibilities.
 - [Database design](../database/design.md): tables, relationships and history.
 - [Database diagrams](../database/README.md): diagrams matching the design.

@@ -367,7 +367,7 @@ The following choices still need team agreement:
 - Profile, authentication, and authorization design.
 - Database schema and migration tooling.
 - Deployment target and expected monthly budget.
-- Local telemetry storage mode and container-log collection scope.
+- Future container-log collection and any production telemetry storage design.
 - Meal data source and nutrition validation approach.
 - Open-source license.
 

@@ -1,9 +1,9 @@
 # Local observability design
 
-Design status: **Alloy collection and Mimir metrics storage approved** by the
-owner on 2026-11-02. The local Mimir storage mode and initial container-log
-scope remain proposals requiring separate approval. The earlier design is
-retained below for context.
+Design status: **Approved direction for local development**. The owner approved
+Alloy collection and Mimir metrics storage on 2026-11-02, then approved the
+local Mimir storage and initial application-log scope. The earlier design is
+retained below for context. Implementation and runtime verification remain pending.
 
 Implementation status: **Not started**. Root Compose defines PostgreSQL 17
 only. Database foundation code and migrations exist, but there is no FastAPI
@@ -13,10 +13,10 @@ Related work: [#7](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/
 through [#11](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/11),
 plus API stories [#12](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/12)
 through [#15](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/15).
-These issues should be reviewed against this published design and the remaining
-decisions before implementation.
+These issues should be reviewed against this design and the recorded decisions
+before implementation.
 
-## Approval record and remaining proposals
+## Approval record and remaining design work
 
 The owner previously approved the local optional Compose approach, shared Python
 OpenTelemetry package, standalone Collector, Prometheus scraping its application
@@ -27,6 +27,12 @@ On 2026-11-02 the owner confirmed Alloy will collect and forward logs, metrics,
 and traces, and Mimir will replace the standalone Prometheus server. The shared
 OpenTelemetry package and Prometheus-compatible protocols and components stay.
 
+The owner also approved a local single-process Mimir using classic ingestion,
+replication factor one and filesystem storage, without Kafka or MinIO. The
+initial stack will collect application logs through OpenTelemetry and Alloy;
+Docker container-log collection is deferred. The chosen Mimir image must be
+verified against this combination during implementation.
+
 | Area | Previously approved | Current direction |
 |---|---|---|
 | Application instrumentation | Shared OpenTelemetry SDKs and OTLP | Keep |
@@ -36,7 +42,7 @@ OpenTelemetry package and Prometheus-compatible protocols and components stay.
 | Logs and traces | Loki native OTLP HTTP; Tempo OTLP | Keep; Alloy forwards the signals |
 | Local deployment | Optional services in root Compose; PostgreSQL independent | Keep |
 | Retention and privacy | Three days logs/metrics; 24 hours traces; no sensitive data | Keep |
-| Container logs | No second copy of application logs | Initial scope and Docker access remain open for approval |
+| Container logs | No second copy of application logs | Initial collection is application OTLP logs only; Docker container logs are deferred |
 
 This revision is not a production architecture. Cloud hosting, alerts, high
 availability, frontend telemetry, and PostgreSQL-server monitoring stay outside
@@ -136,7 +142,7 @@ on its container interface. Preserve trace/span IDs across logs and traces.
 
 ## Local Mimir storage and deployment choice
 
-**Recommendation for approval:** one Mimir process in monolithic mode
+**Approved for local development:** one Mimir process in monolithic mode
 (`target=all`), classic ingestion explicitly selected, replication factor one,
 and local filesystem block storage in a dedicated named volume. This is a
 development-only choice with no high availability or shared storage.
@@ -151,14 +157,14 @@ different choices: running one process does not automatically remove Kafka.
 
 The configuration reference includes filesystem block storage and an
 `ingest_storage.enabled` switch. Combining these supported pieces is our
-local design recommendation, not a configuration we have run. Select a fixed
+approved local design, not a configuration we have run. Select a fixed
 supported image and verify the combination before calling setup runnable.
 Keep block storage, WAL/TSDB data, compactor working files, and any enabled
 rule/Alertmanager storage in distinct directories; never let block cleanup
 operate on rule/alert state.
 [Mimir configuration reference](https://grafana.com/docs/mimir/latest/configure/configuration-parameters/).
 
-No Kafka, MinIO, external bucket, or cloud credentials are proposed for this
+No Kafka, MinIO, external bucket, or cloud credentials are included in this
 single-node filesystem variant. An S3-compatible deployment would need a
 separate object-storage service such as MinIO and bucket initialization;
 ingest-storage mode would additionally need a broker. These add containers,
@@ -173,7 +179,7 @@ remote use is needed, design an authenticated boundary separately.
 
 ## Application logs versus container logs
 
-**Default proposal:** application OpenTelemetry logs only. Keep console logs
+**Approved initial scope:** application OpenTelemetry logs only. Keep console logs
 as a troubleshooting fallback, but do not ingest the same console output from
 Docker as well. The baseline needs no Docker socket or host log mount.
 
@@ -342,8 +348,8 @@ content before making changes; this design task does not update issues.
 
 | Existing story | Recommended change |
 |---|---|
-| [#7: Publish design](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/7) | Record publication and confirmed Alloy/Mimir direction; retain open storage and container-log decisions |
-| [#8: Docker stack](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/8) | Use Alloy/Mimir; record the pending local storage choice, Alloy state, data-source paths, and readiness/persistence checks |
+| [#7: Publish design](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/7) | Record publication and approved Alloy/Mimir, storage and application-log decisions |
+| [#8: Docker stack](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/8) | Use approved local Mimir storage and application-log scope; verify version support, Alloy state, data-source paths and readiness/persistence checks |
 | [#9: Shared Python telemetry](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/9) | Keep SDK/helpers; update receiver destination, metric conversion checks, and Alloy outage/privacy criteria |
 | [#10: Demos](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/10) | Send both callers to Alloy; query Mimir metrics and retain log/trace correlation; no second demo implementation |
 | [#11: Full verification/setup](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/11) | Replace old queries/commands; verify remote-write recovery, compactor retention, actual resource use, and PostgreSQL isolation |
@@ -352,29 +358,23 @@ content before making changes; this design task does not update issues.
 | [#14: Lookup APIs](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/14) | Replace direct-client exclusions with Alloy/Mimir names; keep endpoint/data rules unchanged |
 | [#15: API telemetry](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/15) | Replace scrape flow with Alloy conversion/remote write; show real lookup metrics in Mimir and test Alloy/store outages |
 
-Suggested order: resolve remaining #7 decisions; implement #8 and the coordinated shared
+Suggested order: update #7–#11 with the approved decisions; implement #8 and the coordinated shared
 package #9; run #10 then complete #11. API functional work #12-#14 can proceed
 under its own approvals/dependencies without a running telemetry stack; #15
 joins the implemented APIs to the verified stack. Reuse these stories rather
 than creating another Alloy/Mimir stack backlog.
 
-## Decisions for owner review
+## Remaining implementation choices
 
-1. Decide whether to use monolithic classic Mimir with filesystem storage as a
-   local-only simplification. Kafka/MinIO or remote deployment would need a
-   further scope decision.
-2. Decide whether the initial stack collects only application OTLP logs. If
-   container logs are included, approve targets and a Docker-daemon access
-   approach before implementation.
-
-These are recommendations awaiting approval, not unanswered rules filled in
-silently. Retention, private settings, independent PostgreSQL, shared Python
-telemetry, and existing database product decisions keep their earlier status.
+The local Mimir and initial application-log scope are approved. Kafka, MinIO,
+remote deployment, or Docker container-log collection would need a further
+scope decision. Retention, private settings, independent PostgreSQL, shared
+Python telemetry, and database product decisions keep their earlier status.
 Exact compatible versions, verified probes, and measured resource limits are
 Developer choices within the approved design, not new product questions.
 
 Official Alloy, Mimir and Loki integration references were checked on 2026-11-02.
 The design uses documented
 integration paths; no images were downloaded or configurations run. A human
-reviews the remaining proposals, then manually asks Product Owner to refine the
-affected stories before implementation. No role is started automatically.
+may manually ask Product Owner to refine the affected stories before
+implementation. No role is started automatically.

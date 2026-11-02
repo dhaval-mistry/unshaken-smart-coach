@@ -20,17 +20,17 @@ for collection plus Mimir for metrics storage. Do not mix the two service lists.
 | Grafana | Explore all three stores |
 
 These are proposed containers in the existing root Compose project's optional
-`observability` profile. PostgreSQL stays independent. The recommended local
-Mimir variant is one process, classic ingestion, and filesystem storage, with
-no extra Kafka or MinIO container. This choice needs owner approval and
-version-specific runtime verification; see the design's storage discussion.
+`observability` profile. PostgreSQL stays independent. The approved local
+Mimir variant is one process, classic ingestion, replication factor one, and
+filesystem storage, with no Kafka or MinIO container. The selected image still
+needs version-specific runtime verification; see the design's storage discussion.
 
 ## Prerequisites available today
 
 1. Follow the existing [Docker guide](docker.md).
 2. Use the repository root and existing private `.env` convention. Do not
    overwrite a personal `.env` with `.env.example`.
-3. Review the design's remaining decisions and update existing stories #7-#15
+3. Review the approved design and update existing stories #7-#15
    through the separately requested Product Owner workflow.
 4. During implementation, select fixed compatible images, writable data paths,
    and private Grafana credentials. Commit placeholders only. No observability
@@ -87,12 +87,12 @@ public services. Remote/shared use needs a separate access design.
 
 ## Application logs and container logs
 
-The proposed default uses application logs sent through OpenTelemetry.
+The approved initial scope uses application logs sent through OpenTelemetry.
 Console logging remains available locally, but Alloy must not also collect
 those same entries through Docker.
 
-The proposed application-only setup needs no Docker socket or host-log mount.
-The initial container-log scope remains open. If approved, document the exact
+The application-only setup needs no Docker socket or host-log mount.
+Docker container-log collection is deferred. If later approved, document the exact
 container allowlist, platform-specific daemon permissions, duplicate prevention,
 read positions, and safe restart behavior before enabling it. A read-only
 socket mount does not restrict Docker API actions.
