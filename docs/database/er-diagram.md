@@ -1,12 +1,34 @@
 # UNShaken database ER diagram
 
-Design for review; see [design](design.md) for confirmed requirements, technical
-proposals, nullability, invariants, and remaining decisions. Mermaid does not
-express cross-table ownership, mutually exclusive subtypes, or outcome checks.
-The schema remains at 13 tables with no complete template-version subsystem.
+Design status: **Technical proposal for human review**; see the
+[detailed design](design.md) for confirmed owner answers and proposed mechanics.
+The model retains 13 tables. No schema/migration/runtime implementation is
+included in this diagram.
+
+This diagram shows live foreign keys. Immutable original UUID columns
+intentionally are not FKs: source deletion may clear a live link while its
+original identity, starting plan, and completed performance remain stored.
+Exercise deletion does not cascade into reusable plans; explicit removal/
+replacement of live plan references is proposed before catalog deletion.
+
+A unique partial index enforces one in-progress workout per user. Category
+measurement_kind and its session snapshot distinguish reps, duration and
+duration-plus-distance independently of display labels. Targets, starting
+snapshots, and actuals remain separate; weight stays optional.
+
+starting_plan_snapshot is physically nullable only during the creation
+transaction. A deferred constraint trigger requires validated non-NULL JSON
+at commit; PostgreSQL NOT NULL itself is not deferrable. The populated JSON
+is immutable. Removing an unperformed execution set does not erase its initial
+plan evidence. Mermaid does not express those JSON, ownership, measurement,
+deletion, chronology or immutability guards; the design explains them.
 
 ```mermaid
 erDiagram
+    %% Technical proposal for review; not migration approval.
+    %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
+    %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
+    %% One in-progress workout/user is enforced by a unique partial index.
     direction TB
     users ||--o{ user_identities : authenticates_with
     users ||--o{ custom_exercises : creates
@@ -16,17 +38,17 @@ erDiagram
     body_parts ||--o{ exercises : classifies
     exercises ||--o| provider_exercises : provider_details
     exercises ||--o| custom_exercises : custom_details
-    workout_templates ||--o{ template_exercises : contains
-    exercises ||--o{ template_exercises : references
+    workout_templates ||--o{ template_exercises : contains_live_plan
+    exercises ||--o{ template_exercises : requires_live_reference
     template_exercises ||--o{ template_sets : plans
-    workout_templates o|--o{ workout_sessions : starts
-    workout_templates o|--o{ workout_sessions : applied_target
-    workout_templates o|--o{ workout_templates : copied_from
-    workout_sessions ||--o{ session_exercises : contains
-    exercises ||--o{ session_exercises : references
-    template_exercises o|--o{ session_exercises : source
-    session_exercises ||--o{ session_sets : records
-    template_sets o|--o{ session_sets : source
+    workout_templates o|--o{ workout_sessions : live_source
+    workout_templates o|--o{ workout_sessions : live_applied_target
+    workout_templates o|--o{ workout_templates : live_copy_source
+    workout_sessions ||--o{ session_exercises : retains
+    exercises o|--o{ session_exercises : live_exercise
+    template_exercises o|--o{ session_exercises : live_source_entry
+    session_exercises ||--o{ session_sets : retains_performance
+    template_sets o|--o{ session_sets : live_source_set
     users {
         uuid id PK
         string display_name
@@ -51,6 +73,7 @@ erDiagram
         smallint id PK
         string name
         smallint sort_order
+        string measurement_kind
         boolean is_active
     }
     body_parts {
@@ -95,6 +118,7 @@ erDiagram
         string name
         text notes
         uuid copied_from_template_id FK
+        uuid copied_from_template_id_snapshot
         integer version
         timestamptz archived_at
         timestamptz created_at
@@ -112,6 +136,8 @@ erDiagram
         uuid template_exercise_id FK
         integer set_number
         integer target_reps
+        integer target_duration_seconds
+        decimal target_distance_meters
         decimal suggested_weight
         string weight_unit
         integer rest_seconds
@@ -120,8 +146,11 @@ erDiagram
         uuid id PK
         uuid user_id FK
         uuid source_template_id FK
+        uuid source_template_id_snapshot
+        string source_template_type_snapshot
         integer source_template_version
         string name_snapshot
+        jsonb starting_plan_snapshot
         string status
         timestamptz started_at
         timestamptz finished_at
@@ -130,6 +159,7 @@ erDiagram
         boolean template_update_requested
         string template_update_status
         uuid applied_template_id FK
+        uuid applied_template_id_snapshot
         timestamptz created_at
         timestamptz updated_at
     }
@@ -137,10 +167,14 @@ erDiagram
         uuid id PK
         uuid session_id FK
         uuid exercise_id FK
+        uuid exercise_id_snapshot
+        string exercise_source_type_snapshot
         uuid source_template_exercise_id FK
+        uuid source_template_exercise_id_snapshot
         string name_snapshot
         string category_snapshot
         string body_part_snapshot
+        string measurement_kind_snapshot
         integer position
         text notes
     }
@@ -148,18 +182,22 @@ erDiagram
         uuid id PK
         uuid session_exercise_id FK
         uuid source_template_set_id FK
+        uuid source_template_set_id_snapshot
         integer set_number
         integer target_reps_snapshot
+        integer target_duration_seconds_snapshot
+        decimal target_distance_meters_snapshot
         decimal suggested_weight_snapshot
         string suggested_weight_unit_snapshot
         integer actual_reps
+        integer actual_duration_seconds
+        decimal actual_distance_meters
         decimal actual_weight
         string weight_unit
         string status
         timestamptz completed_at
         integer rest_seconds
         boolean was_in_starting_plan
-        timestamptz removed_at
         timestamptz rest_started_at
         timestamptz rest_ended_at
         timestamptz created_at
