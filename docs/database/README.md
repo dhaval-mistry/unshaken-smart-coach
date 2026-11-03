@@ -10,15 +10,18 @@ published by this task.
 - [ER diagram](er-diagram.md) and [matching Mermaid source](er-diagram.mmd)
 - [Verified setup and migration commands](../setup/backend.md)
 
-The 13 application tables contain 128 columns. Alembic has its separate
+The current 13 application tables contain 128 columns. Alembic has its separate
 revision-tracking table. Two migrations create the schema/guards and install
 stable master data: eight categories and eleven body parts, including None.
 
-Cardio completion requires time and distance; Duration requires time; the other
-six categories require reps. Weight is optional for all. One workout per user
-may be in progress. Permanent source deletion keeps the starting plan/original
-UUIDs and completed performance. Completed-workout/set deletion is not an API
-feature; database guards reject destructive history changes.
+In the current migration, Cardio requires time and distance, Duration requires
+time, and the other six categories require reps. The owner later approved
+duration-only Bodyweight exercises, complete templates before Save, and a
+Cancel choice: save completed work as partial history or discard an active
+draft after warning that completed work will be deleted. These changes need a
+new migration and API work; they are **not yet implemented**. Weight remains
+optional. One workout per user may be in progress. Permanent source deletion
+keeps retained history. Completed and saved-partial history remains protected.
 
 Validation uses fresh disposable PostgreSQL 17 databases and synthetic data.
 Checks cover schema/keys/indexes/seeds, measurement/ownership/source failures,

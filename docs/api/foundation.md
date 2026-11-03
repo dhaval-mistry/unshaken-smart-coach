@@ -9,7 +9,9 @@ no FastAPI application or implemented endpoint in this repository yet.
 Related context: [system overview](../architecture/overview.md),
 [database design](../database/design.md), [ER diagram](../database/er-diagram.mmd),
 [observability design](../architecture/observability.md), and
-[backend setup](../setup/backend.md). Existing API stories are tracked in GitHub.
+[backend setup](../setup/backend.md). The owner's later approved workout
+choices and proposed contracts are in [workout API design](workouts.md).
+Existing API stories are tracked in GitHub.
 
 ## Start with user actions
 
@@ -24,15 +26,19 @@ The other actions below show the next design steps, not approved API contracts.
 | Open the New exercise form | Load active categories and body parts | Detailed below; needs approved seeds |
 | Browse or search exercises | Return provider exercises and only this user's private exercises | Later; needs verified identity, provider mapping, and search rules |
 | Save a custom exercise | Save name, category, body part, and creator together | Later; needs verified identity and approved database enforcement |
-| Create or change a workout template | Save an ordered plan of exercises and sets | Later; needs template-readiness, editing, and archive rules |
-| Start a workout from a template or without one | Capture a starting plan without changing the source | Later; needs active-workout and incomplete-plan decisions |
+| Create or change a workout template | Save an ordered plan with at least one exercise and complete targets | Later; zero-set exercise and editing rules remain open |
+| Start a workout from a template or without one | Capture a complete starting plan without changing the source | Later; one active workout is approved; ad hoc request details remain open |
 | Record a set and start rest | Save actual performance and start rest once, including on retry | Later; follow approved measurement rules and decide timer changes |
 | Finish a workout | Save history, then handle the explicit template-update choice | Later; needs update mapping, conflict, and retry decisions |
+| Cancel an active workout | Warn that Discard deletes completed draft work; Save retains completed sets and cancels unfinished sets | Later; proposed contract and migration in [workouts.md](workouts.md) |
 | Review workout history and previous performance | Read the user's preserved workout records | Later; needs history matching and correction decisions |
 
 Google/Microsoft sign-in is a confirmed requirement, but token validation,
 application sessions, and account linking still need their own design. A
 user ID in a header, request body, or development setting is not authentication.
+Bodyweight may use duration instead of reps after a new database migration.
+The current migration still treats Bodyweight as reps only. These approved
+rules do not change the four initial, read-only endpoint contracts below.
 
 ## Proposed endpoint summary
 
@@ -267,10 +273,11 @@ its non-personal local endpoints. The versioned paths, response shape, error
 codes, request IDs, three-second database deadline, and initial no-cache choice
 are technical recommendations to approve with this design.
 
-Keep the database's existing open decisions in its own
-[decision list](../database/design.md#open-decisions-resolve-before-final-migrations).
+Keep the database's remaining decisions in its
+[decision list](../database/design.md#remaining-future-decisions-and-review-boundary).
 This document resolves none of them. Identity design is needed before private
-exercise APIs; workout APIs also need the applicable workout decisions above.
+exercise APIs; [workout design](workouts.md) records later approved behavior
+and its still-open contracts.
 
 After human approval, a separately requested Product Owner can review the
 existing issues covering:

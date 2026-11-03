@@ -2,9 +2,12 @@
 
 Design basis: **Reviewed and merged through PR #17**, followed by the owner's
 instruction to implement stories #3 and #4 against that design. Confirmed
-product answers are retained below; remaining API decisions stay deferred.
+product answers are retained below. The later timed-bodyweight, template-save,
+and Cancel decisions below are **approved design changes, not implemented
+database behavior**. Remaining API decisions stay deferred.
 
-Implementation status: **Local SQLAlchemy/Alembic implementation under verification**.
+Implementation status: **The existing SQLAlchemy/Alembic foundation implements
+the earlier rules; the later approved changes need a new migration and API work**.
 It has not been applied to the owner's existing database. PostgreSQL
 17 setup was merged through [PR #16](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/16).
 This revision starts from main `9b38ce9cdcad468a8a2cac302125c4c346523adc`.
@@ -38,6 +41,13 @@ Retain the previously confirmed requirements:
 - Custom exercises require name, category, and body part. None is a real
   selectable body-part value, not SQL NULL or an automatic form selection.
 - Browser and mobile clients share the same database/API.
+- A Bodyweight exercise may use duration instead of reps. Do not require dummy
+  reps for a timed Plank. Weight remains optional.
+- A template needs at least one exercise and all necessary exercise details
+  and targets before Save.
+- Cancelling an active workout offers a warning that Discard deletes even
+  completed reps. Discard saves no workout. Save keeps completed work and marks
+  unfinished exercises cancelled.
 
 The owner answered the remaining initial-scope questions in the issue #2 task
 conversation on 2026-11-01:
@@ -47,7 +57,7 @@ conversation on 2026-11-01:
 | Include time/distance in the first version? | Yes; do not defer Cardio/Duration or require dummy reps |
 | Complete a Cardio set | Positive duration **and** positive distance are required |
 | Complete a Duration set | Positive duration is required |
-| Complete one of the other six category kinds | Positive actual reps are required |
+| Complete an initially reps-kind set | The existing migration requires positive reps for six categories; the later approved change permits a Bodyweight exercise to use duration instead |
 | Weight for any category | Still optional |
 | Simultaneous workouts | At most one in-progress workout per user |
 | Delete live exercise/template/planned-set sources | Permanent deletion is allowed while workout history is preserved |
@@ -81,14 +91,19 @@ precision. For example, ten minutes and 1.5 km become 600 seconds and
 1500.000 meters. These canonical units follow the merged design;
 preserving a user's entered display unit is not part of this schema.
 
-`exercise_categories.measurement_kind` separates behavior from an editable
-display label. Capture it in each session exercise. A later category-name
-change must not change how an existing session's performance is interpreted.
+The existing migration gets a measurement kind from
+`exercise_categories.measurement_kind` and copies it to each session exercise.
+The approved timed-Bodyweight change needs `exercises.measurement_kind` as the
+effective kind for each exercise. Keep the category kind as the usual kind and
+default when creating an exercise. Bodyweight may choose `reps` or `duration`;
+other categories continue to use their category kind until another change is
+approved. Capture the effective exercise kind in each session exercise. A later
+catalog or category edit must not reinterpret a past performance.
 
 | Kind | Categories initially | Valid target/actual measurement fields | Completion requires |
 |---|---|---|---|
-| reps | Barbell, Dumbbell, Machine/Other, Bodyweight, Assisted Bodyweight, Reps Only | reps | Positive actual_reps |
-| duration | Duration | duration_seconds | Positive actual_duration_seconds |
+| reps | Barbell, Dumbbell, Machine/Other, Bodyweight when selected, Assisted Bodyweight, Reps Only | reps | Positive actual_reps |
+| duration | Duration, or Bodyweight when selected for that exercise | duration_seconds | Positive actual_duration_seconds |
 | duration_distance | Cardio | duration_seconds and distance_meters | Both actual values positive |
 
 Proposed minimal rule: unused measurement fields are NULL, not zero or dummy
@@ -98,7 +113,98 @@ pairs stay optional and independent for every kind. Rest may be zero.
 
 The NULL rules and canonical units are technical representation choices from
 the merged design. They do not approve target-readiness rules for a future
-start-workout API or add optional cross-category measurement features.
+start-workout API or add optional cross-category measurement features. For
+example, a 45-second Bodyweight Plank has kind `duration`, actual duration 45,
+NULL reps, and optional NULL weight. Explicit weight zero requires kg or lb;
+missing weight stays NULL rather than being silently converted to zero.
+
+### Approved follow-up design: timed Bodyweight, template Save, and Cancel
+
+These rules supersede the earlier reps-only Bodyweight, permissive template
+Save, and no-active-session-delete rules **for future implementation**. The checked-in
+`0001`/`0002` migrations still enforce those earlier rules today. Add a new
+versioned migration; never edit an applied migration in place.
+
+```mermaid
+flowchart LR
+    A["Bodyweight exercise: reps or duration"] --> B["Template: complete targets before Save"]
+    B --> C["Active workout: one per user"]
+    C -->|"Finish"| D["Completed workout history"]
+    C -->|"Cancel, then Save"| E["Partial history: completed sets kept, unfinished sets cancelled"]
+    C -->|"Cancel, then Discard"| F["Draft and all its sets removed after warning"]
+```
+
+**Template Save.** A save operation checks the complete template in one
+transaction. It rejects zero exercises, missing exercise identity/name or
+classification, missing required target values for the selected measurement
+kind, nonpositive targets, and incompatible fields. The current tables allow
+blank targets. The proposed first implementation holds incomplete edits in
+the client and writes the template plus all children atomically at Save. The
+service validates the full plan and a deferred database guard checks the
+committed template, including edits/deletion of its last exercise or required
+target. A partial transaction cannot leave a published incomplete template.
+If stored drafts are later wanted, they need an explicit draft/published state
+and guards that prevent an incomplete draft being started. The owner has not
+selected a stored-draft feature. Whether every exercise must contain at least
+one set is still an explicit question below; do not claim a zero-set exercise
+is an approved complete template.
+
+**Cancel then Discard.** The client first warns that completed reps, durations,
+weights, and rest records in this active workout will be deleted. Only after
+explicit confirmation, a scoped database operation locks the user's own
+`in_progress` session, deletes its sets and exercises, then the session in one
+transaction. It must reject another user's session and every terminal session.
+This is the one exception to session history protection: a discarded active
+draft has no retained workout or starting-plan snapshot. The transaction frees
+the one-active-workout slot. A failed transaction leaves the entire draft
+intact. Restrict direct table deletes so callers cannot use this path to erase
+completed history; verify the parent status and owner inside the operation.
+
+**Cancel then Save.** Keep the session and all completed sets. Change each
+remaining pending set to `cancelled` in the same transaction, leave already
+skipped sets as skipped, set the session status to `cancelled`, and set
+`finished_at` to the server's event time. A session exercise with any cancelled
+set is shown as cancelled; derive this from its sets rather than adding a
+second status that could disagree. For example, if Squat set 1 was completed
+and set 2 was pending, the saved history retains set 1 and marks set 2 and
+that exercise cancelled. The completed set's actuals, `completed_at`, and
+rest timestamps remain unchanged. A cancelled set has no actual performance,
+completion timestamp, or rest timestamps. A terminal session cannot resume or
+be discarded. The `cancelled` session status distinguishes this partial save
+from a normally completed workout. No template update is assumed for this
+path; whether to offer it remains open.
+
+**Migration and compatibility.** Add `exercises.measurement_kind` using the
+existing three values. Backfill existing exercises from their current category
+kind, then require a value and enforce the category compatibility above. Keep
+existing category seed IDs and names. Change template validation and session
+capture guards to use the exercise kind. Existing
+`session_exercises.measurement_kind_snapshot` and the JSON starting snapshot
+stay immutable and retain their original kind. Add `cancelled` to the
+`session_sets.status` check and update the row/cross-table guards: completed
+sets still require kind-specific actuals and timestamps; cancelled sets allow
+no actuals or completion/rest events. Add the deferred template completeness
+guard on the template and its children, subject to the zero-set decision; its
+check must cover insert, edit, and child removal. Design a narrow in-progress discard
+operation with child-delete permission and protect terminal sessions and sets.
+The existing one-active partial index remains. Preflight any existing
+`cancelled` sessions with pending sets before changing their meaning; do not
+silently rewrite historical rows. Check existing template rows for incomplete
+targets before enforcing a published-template invariant; report and resolve
+conflicts rather than deleting or inventing values.
+
+**Validation expected on a disposable PostgreSQL 17 database.** A timed
+Bodyweight exercise and template set accept positive duration and NULL reps;
+a reps-based Bodyweight exercise still needs positive reps. Wrong or mixed
+measurement fields, missing weight unit, and nonpositive targets/actuals fail.
+Saving an empty or incomplete template fails atomically. Concurrent starts
+still allow only one active session per user. Discard confirmation deletes
+only the owner's active draft, including completed draft sets, and a failed
+discard rolls back. Cancel then Save retains completed performance and the
+starting plan, marks pending sets cancelled, sets the terminal time, and
+releases the active slot. Delete attempts against completed or saved-partial
+history fail. Existing exercises, snapshots, template data, and seeds survive
+the migration without a category or historical measurement change.
 
 ## Table dictionary
 
@@ -144,7 +250,7 @@ Unique (provider, issuer, subject). Never store provider passwords or automatica
 | id | SMALLINT | Stable seed identifier. |
 | name | VARCHAR(50) | Required; unique. |
 | sort_order | SMALLINT | Required; unique within this table. |
-| measurement_kind | VARCHAR(20) | Required; reps, duration, or duration_distance. Determines valid set fields. |
+| measurement_kind | VARCHAR(20) | Required; reps, duration, or duration_distance. Usual kind for exercises in this category; the approved Bodyweight exception is chosen on the exercise. |
 | is_active | BOOLEAN | Required; default true. |
 
 Versioned seeds carry stable IDs, names, sort order, measurement kind, and initially active=true. Proposed ID/order mapping: 1 Barbell/reps; 2 Dumbbell/reps; 3 Machine/Other/reps; 4 Bodyweight/reps; 5 Assisted Bodyweight/reps; 6 Reps Only/reps; 7 Cardio/duration_distance; 8 Duration/duration. The names/order are already approved; this explicit ID mapping is technical proposal for #4. Deactivate master choices rather than changing their meaning. A measurement-kind change affecting references needs a reviewed migration.
@@ -168,13 +274,14 @@ Approved ordered values: None; Arms; Back; Cardio; Chest; Core; Full Body; Legs;
 | name | VARCHAR(200) | Required; trimmed, nonblank; duplicates allowed. |
 | category_id | SMALLINT | Required FK exercise_categories. |
 | body_part_id | SMALLINT | Required FK body_parts. |
+| measurement_kind | VARCHAR(20) | **Planned new column**; required effective reps/duration/duration_distance kind. Backfill existing rows from category. Bodyweight may be reps or duration; other categories match their category kind. |
 | source_type | VARCHAR(20) | Required; provider or custom. |
 | description | TEXT | Nullable. |
 | is_active | BOOLEAN | Required; default true; does not prohibit approved permanent deletion. |
 | created_at | TIMESTAMPTZ | Required; server creation timestamp, immutable. |
 | updated_at | TIMESTAMPTZ | Required; server-maintained modification timestamp. |
 
-A provider/custom subtype must exist exactly once and match source_type at transaction end. Database guards cover parent and subtype changes. Editing names/classification must never rewrite historical session copies. Catalog deletion is allowed after explicit removal/replacement from live reusable plans; history itself does not block deletion.
+A provider/custom subtype must exist exactly once and match source_type at transaction end. Database guards cover parent and subtype changes. Changing an exercise's effective measurement kind while a live template uses it must also leave every planned set valid; reject incompatible edits until the plan is explicitly changed. Editing names/classification must never rewrite historical session copies. Catalog deletion is allowed after explicit removal/replacement from live reusable plans; history itself does not block deletion.
 
 ### provider_exercises
 
@@ -248,7 +355,7 @@ Unique (template_id, position); repeated exercise IDs are allowed. Reordering ne
 | weight_unit | VARCHAR(2) | Nullable; kg/lb iff suggested_weight is supplied. |
 | rest_seconds | INTEGER | Required; default 120; nonnegative. |
 
-Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's current category measurement_kind, including when a live parent/category changes. Target values may remain missing while a plan is edited. This does not decide whether the future API lets a participant start an incomplete plan.
+Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's effective `exercises.measurement_kind`, including when a live exercise/category changes. The old migration still checks the category kind. Targets may be absent only in an unsaved edit; Save and Start must reject a missing required target. Whether an exercise can have zero sets remains open.
 
 ### workout_sessions
 
@@ -274,7 +381,7 @@ Unique (template_exercise_id, set_number). Validate fields against the reference
 | created_at | TIMESTAMPTZ | Required; server creation timestamp, immutable. |
 | updated_at | TIMESTAMPTZ | Required; server-maintained modification timestamp. |
 
-Template-backed versus ad hoc is determined from source_template_id_snapshot, not the nullable live source_template_id. A deleted source does not turn a historical template workout into an ad hoc workout. Original source UUID, kind, version and starting snapshot stay immutable. Enforce one in_progress row per user with a partial unique index. Completed/cancelled cannot return to in_progress. No session hard-delete workflow is included.
+Template-backed versus ad hoc is determined from source_template_id_snapshot, not the nullable live source_template_id. A deleted source does not turn a historical template workout into an ad hoc workout. Original source UUID, kind, version and starting snapshot stay immutable for retained sessions. Enforce one in_progress row per user with a partial unique index. Completed/cancelled cannot return to in_progress. The approved, confirmed Discard operation may remove an owned in-progress draft and all children; terminal sessions remain protected.
 
 ### session_exercises
 
@@ -290,11 +397,11 @@ Template-backed versus ad hoc is determined from source_template_id_snapshot, no
 | name_snapshot | VARCHAR(200) | Required immutable captured exercise name. |
 | category_snapshot | VARCHAR(50) | Required immutable captured category name. |
 | body_part_snapshot | VARCHAR(50) | Required immutable captured body-part name. |
-| measurement_kind_snapshot | VARCHAR(20) | Required immutable reps/duration/duration_distance kind; drives completion independently of later labels. |
+| measurement_kind_snapshot | VARCHAR(20) | Required immutable effective exercise kind (reps/duration/duration_distance); drives completion independently of later catalog edits or labels. |
 | position | INTEGER | Required; positive; unique per session. |
 | notes | TEXT | Nullable. |
 
-Unique (session_id, position). At capture/insertion, validate a real accessible exercise, matching name/category/body-part/measurement-kind snapshots, and any template-entry lineage. Afterward snapshots and original IDs cannot change. A catalog or source-entry delete detaches only its live FK. Session-exercise rows are retained; this revision does not grant a separate exercise-entry deletion/reorder feature inside a workout.
+Unique (session_id, position). At capture/insertion, validate a real accessible exercise, matching name/category/body-part/effective-measurement-kind snapshots, and any template-entry lineage. Afterward snapshots and original IDs cannot change for a retained session. A catalog or source-entry delete detaches only its live FK. Session-exercise rows are retained in saved history; confirmed Discard deletes the entire active draft. This revision does not grant a separate exercise-entry deletion/reorder feature inside a workout.
 
 ### session_sets
 
@@ -315,7 +422,7 @@ Unique (session_id, position). At capture/insertion, validate a real accessible 
 | actual_distance_meters | NUMERIC(12,3) | Nullable until completion; positive meters; required for completed duration_distance kind only. |
 | actual_weight | NUMERIC(10,3) | Nullable; nonnegative; optional for every category. |
 | weight_unit | VARCHAR(2) | Nullable; kg/lb iff actual_weight is supplied. |
-| status | VARCHAR(20) | Required; pending, completed, or skipped. |
+| status | VARCHAR(20) | Required; pending, completed, skipped, or **planned new value** cancelled. Cancelled means unfinished when the user saves a partial workout. |
 | completed_at | TIMESTAMPTZ | Required iff completed; retained and immutable after completion. |
 | rest_seconds | INTEGER | Required; default 120; nonnegative. |
 | was_in_starting_plan | BOOLEAN | Required; true iff this execution row belongs to the immutable initial plan. |
@@ -324,7 +431,7 @@ Unique (session_id, position). At capture/insertion, validate a real accessible 
 | created_at | TIMESTAMPTZ | Required; server creation timestamp, immutable. |
 | updated_at | TIMESTAMPTZ | Required; server-maintained modification timestamp. |
 
-Unique (session_exercise_id, set_number). Original targets and source UUID are immutable. Starting rows must match starting_plan_snapshot exactly; additions are marked false and do not claim original template-source lineage or starting targets. Completed rows retain actual values and completion/rest timestamps. Only a never-completed, unperformed row in an in-progress session may be physically removed under the deletion proposal below; removed_at is no longer used as the required representation.
+Unique (session_exercise_id, set_number). Original targets and source UUID are immutable for retained sessions. Starting rows must match starting_plan_snapshot exactly; additions are marked false and do not claim original template-source lineage or starting targets. Completed rows retain actual values and completion/rest timestamps in retained history. A cancelled set has no actuals, completion timestamp, or rest timestamps; the parent `finished_at` records the partial-save event. Only a never-completed, unperformed row in an in-progress session may be removed individually. The separate confirmed Discard operation removes the entire active draft, including completed rows, after the warning.
 
 ## Immutable starting-plan snapshot and capture boundary
 
@@ -361,8 +468,9 @@ Each exercises array item contains:
 - Reps/duration/set numbers/rest are JSON integers or allowed nulls. Distances
   and weights are decimal strings with at most three fractional digits or null,
   avoiding a floating-point round trip. UUIDs and all field types are validated.
-- Apply the same positive-value, measurement-kind and weight/unit rules as the
-  relational targets. Required fields must exist even when their value is null.
+- Apply the same positive-value, effective exercise measurement-kind, and
+  weight/unit rules as the relational targets. Required fields must exist even
+  when their value is null.
   Reject unknown keys, duplicate IDs/positions/set numbers, and incorrect arrays.
 - Arrays follow position/set_number order. The copy contains every initial
   exercise/set, including ad hoc starting entries if supplied. It excludes
@@ -429,9 +537,10 @@ directly; do not create a personal copy just to start a workout. New sets
 receive concrete rest_seconds=120, and ad hoc workouts do not create templates.
 
 Completing a set must submit the actual required measurement for its captured
-kind. Cardio needs duration and distance; Duration needs duration; the six
-rep-based categories need reps. Never infer actuals from targets or require
-weight. A row/constraint guard rejects a mismatched or missing measurement.
+kind. Cardio needs duration and distance; Duration and a duration-kind
+Bodyweight exercise need duration; a reps-kind exercise needs reps. Never
+infer actuals from targets or require weight. A row/constraint guard rejects
+a mismatched or missing measurement.
 
 Lock or conditionally transition the pending set once, setting completed_at
 and rest_started_at to the same server event time. Retrying an already
@@ -439,9 +548,11 @@ completed set returns the recorded result and original timestamps; it does
 not restart rest or overwrite actuals. Remaining rest is calculated from the
 stored start plus rest_seconds, without a write every second.
 
-Completed performance and terminal session status cannot be rewound to make
-a delete appear to concern an unperformed row. Further timer adjustment,
-skip/undo, pause/resume, and correction behavior remain future API decisions.
+Completed performance in retained sessions and terminal session status cannot
+be rewound to make a delete appear to concern an unperformed row. The approved
+Discard operation is limited to a confirmed, owned, in-progress draft. Further
+timer adjustment, skip/undo, pause/resume, and correction behavior remain
+future API decisions.
 
 ### Finish and optional template update
 
@@ -473,21 +584,25 @@ Retries reuse a recorded result and must not create a second sample copy.
 Transient optional-write failure can remain pending with choice=true for a
 later agreed retry. Exact field mapping, blank-weight handling, skipped/
 removed-set mapping, late completions, conflict resolution, retry expiry,
-cancelled-session choices, and changing a saved answer require future service
-design; the schema does not silently choose those behaviors.
+template-update behavior for a saved partial session, and changing a saved
+answer require future service design; the schema does not silently choose
+those behaviors.
 
 ### Previous performance
 
-Later queries can use the user's completed sessions and original exercise UUID,
-including when the live exercise is gone. Whether history matching uses all
-workouts, only a template, or repeated-exercise occurrences remains open.
+The owner confirmed that previous performance for an exercise spans workouts
+inside and outside the current template. Use the user's retained sessions and
+original exercise UUID, including when the live exercise is gone; never match
+another user's performance. Repeated-exercise/set matching and inclusion of
+completed sets from saved partial sessions remain open.
 Do not store a stale previous_weight copy or silently relabel kg as lb.
 
 ## Permanent deletion while preserving history
 
 Permanent source deletion is allowed; mandatory archiving/RESTRICT against all
-historical references is no longer the design. The following mechanics are
-implemented in the local database guards, not as application deletion APIs.
+historical references is no longer the design. The existing source/history
+mechanics are in local database guards. Discard and saved-partial set status
+below still need a new migration and service operation.
 
 | Relationship or operation | Proposed behavior |
 |---|---|
@@ -501,7 +616,8 @@ implemented in the local database guards, not as application deletion APIs.
 | Delete previously applied personal target | SET NULL applied_template_id; preserve applied_template_id_snapshot, applied status and update time |
 | Delete an unperformed session set | While session is in_progress, allow physical removal only if it has never completed and has no submitted actual performance or rest/completion timestamps; initial plan remains in JSON |
 | Delete a completed set or rewind it to pending/skipped | Reject; correction/deletion needs a separately approved feature |
-| Delete a session, including parent cascades | Reject in version one; no permanent-delete workflow is granted for completed, cancelled, or in-progress session history |
+| Discard an active draft after warning and confirmation | Delete its sets, exercise rows, and session atomically through the scoped operation; completed draft performance is intentionally discarded |
+| Delete a completed or saved-partial session, including parent cascades | Reject; retained history has no permanent-delete workflow |
 | Delete a session exercise | Retain captured execution parent; this revision grants source/catalog and unperformed-set deletion, not a new in-workout entry deletion feature |
 | Hard-delete a user with retained data | RESTRICT initially; account erasure is a separate product/security design |
 
@@ -556,14 +672,17 @@ ownership checks. Test attempted mixed detachment/performance edits as invalid.
 - in_progress requires finished_at NULL; completed/cancelled requires
   finished_at >= started_at. completed_at/rest_started_at are required iff the
   set is completed and initially equal. A rest end requires start and >= start.
+  Cancelled sets have no performance or rest events; the parent finish time
+  records when the partial workout was saved.
 - A unique partial index on workout_sessions(user_id) where
   status='in_progress' enforces the confirmed one-active rule under concurrency.
   Never delete a user's data to fix duplicates found by a later migration.
 
 ### Cross-table and immutable-history guards
 
-Issue #3 must implement and verify these database guards, not merely promise a
-future service will check them. Use ordinary checks/FKs where possible and
+Issue #3 implemented the earlier foundation guards. The approved follow-up
+rules require a new migration that extends those guards; a future service
+check alone is insufficient. Use ordinary checks/FKs where possible and
 deferred constraint triggers where complete transaction state is needed.
 
 | Invariant | Proposed enforcement and verification |
@@ -572,9 +691,9 @@ deferred constraint triggers where complete transaction state is needed.
 | Ownership/source lineage | Guards on parent and child changes; cross-user custom references, custom-in-sample, mismatched original template/entry/set and applied copy targets fail |
 | Valid initial capture | One-time shape/mirror validation plus deferred committed non-NULL check; malformed JSON, missing/mismatched initial rows, forged original IDs and unsealed commit fail |
 | Snapshot/performance immutability | Reject edits to initial JSON/original IDs/targets; completed actuals/events and terminal statuses cannot rewind; only narrowly checked live-FK detachments allowed |
-| Correct measurement mode | Resolve live template kind or immutable session kind; wrong/missing required actuals and populated unused fields fail, even with renamed labels |
+| Correct measurement mode | Resolve a live template set through the exercise's effective kind, or use the immutable session kind; wrong/missing required actuals and populated unused fields fail, even with renamed labels |
 | Event chronology | Cross-table checks put set completion/rest/removal operations within the parent's allowed chronology; no performance writes after terminal status |
-| Safe physical removal | Restrict delete to an unperformed set in an in-progress parent; initial JSON stays; reject completed-row or parent-delete bypass |
+| Safe physical removal | Restrict ordinary row deletes to an unperformed set in an in-progress parent. Only the scoped, confirmed Discard operation may remove every row of an owned active draft; reject terminal parent/child deletes and bypass attempts |
 | No duplicate active workout | Partial unique index; verify competing transactions/in-progress status changes, then slot release on terminal transition |
 | Timestamp maintenance | Server defaults and update trigger; preserve created_at and event timestamps rather than trusting caller-updated updated_at |
 | Source deletion and later UUID reuse | Exact SET NULL detachment with originals retained; reject forged orphan capture/reassignment, mixed historical edits, or reinserted source IDs that would impersonate retained history |
@@ -618,27 +737,36 @@ Do not install an extension just because it may be useful later.
 
 ## Remaining future decisions and review boundary
 
-The owner has resolved first-version measurement requirements, one-active
-policy, permanent source deletion with preserved history, and no completed
-performance deletion. Do not reopen these answers or approved seed names.
+The owner has resolved the initial measurement requirements, timed Bodyweight,
+one-active policy, permanent source deletion with preserved retained history,
+template Save completeness, and the Cancel warning/Discard/partial-Save choice.
+Do not reopen these answers or approved seed names. The Discard exception
+applies only to an active draft; it does not grant deletion of saved history.
 
 The following still need their future feature designs; this document proposes
 keeping them outside the physical foundation rather than inventing behavior:
 
 1. Custom-exercise editing details and completed-performance correction/undo.
-2. Previous-performance scope and repeated-exercise matching.
-3. Exact template-update mapping, blank values, changed units, conflict/retry
-   resolution/expiry, cancelled-session choices and late-finish behavior.
+2. Previous-performance repeated-exercise/set matching; scope across templates
+   is approved, while saved-partial inclusion remains open.
+3. Exact template-update mapping, changed units, conflict/retry
+   resolution/expiry, whether a saved partial workout offers a template update,
+   and late-finish behavior.
 4. ExerciseDB version, payload mapping, caching/media terms and sync operations.
 5. Timer adjustment, skip, undo, pause/resume.
 6. Account linking/application-session storage, onboarding unit default,
    sample administration, account erasure.
-7. Template-start readiness with missing targets and in-workout exercise
-   removal/reordering beyond the specific unperformed-set operation above.
+7. Whether every template exercise must include at least one set; the owner
+   requires at least one exercise and complete targets at Save, and Start must
+   refuse an incomplete template. In-workout exercise removal/reordering beyond
+   the specific unperformed-set operation remains undecided.
+8. Whether a Bodyweight exercise's effective kind can change after it appears
+   in a live template, and whether Assisted Bodyweight also needs duration.
 
-No API implementing those behaviors is included in #3/#4. If their later
-agreement changes fields or guards, add a new migration; do not rewrite the
-initial migration or pretend this document settled the product rule.
+No API implementing those behaviors is included in #3/#4. The newly approved
+changes require a new migration and planned API work; they are not present in
+the foundation implementation. Do not rewrite the initial migration or
+pretend this document settled the remaining product rules.
 
 PR #17 supplied the reviewed representation for canonical units, unused-field
 NULL rules, one-time JSON capture, original UUIDs/live links, and deletion

@@ -1,8 +1,11 @@
 # UNShaken database ER diagram
 
 Design basis: **Reviewed PR #17**, followed by local implementation of stories
-#3/#4. See the [detailed design](design.md) and [setup guide](../setup/backend.md).
-The model retains 13 tables. The owner's existing database is not migrated.
+#3/#4 and the owner's later approved timed-Bodyweight, complete-template-Save,
+and Cancel choices. See the [detailed design](design.md) and
+[setup guide](../setup/backend.md). The model retains 13 tables. The later
+approved changes require a new migration and are not in the current schema.
+The owner's existing database is not migrated by this document.
 
 This diagram shows live foreign keys. Immutable original UUID columns
 intentionally are not FKs: source deletion may clear a live link while its
@@ -10,10 +13,15 @@ original identity, starting plan, and completed performance remain stored.
 Exercise deletion does not cascade into reusable plans; explicit removal/
 replacement of live plan references is proposed before catalog deletion.
 
-A unique partial index enforces one in-progress workout per user. Category
-measurement_kind and its session snapshot distinguish reps, duration and
-duration-plus-distance independently of display labels. Targets, starting
-snapshots, and actuals remain separate; weight stays optional.
+A unique partial index enforces one in-progress workout per user. The planned
+`exercises.measurement_kind` chooses the effective kind for each exercise;
+Bodyweight may use reps or duration. The category kind remains the usual
+default, while the immutable session snapshot protects past performance.
+Targets, starting snapshots, and actuals remain separate; weight stays
+optional. The planned `cancelled` set status identifies unfinished sets in a
+saved partial workout. A confirmed Discard removes only an in-progress draft;
+terminal session history stays protected. Template Save requires at least one
+exercise and complete targets, a rule the ER diagram alone cannot express.
 
 starting_plan_snapshot is physically nullable only during the creation
 transaction. A deferred constraint trigger requires validated non-NULL JSON
@@ -24,10 +32,12 @@ deletion, chronology or immutability guards; the design explains them.
 
 ```mermaid
 erDiagram
-    %% Reviewed PR17 design; local migration implementation, not applied to owner database.
+    %% Reviewed PR17 foundation plus approved follow-up proposals; follow-up migration not written.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
+    %% exercises.measurement_kind and session_sets cancelled status are planned changes.
+    %% Confirmed Discard removes only an owned in-progress draft; terminal history remains protected.
     direction TB
     users ||--o{ user_identities : authenticates_with
     users ||--o{ custom_exercises : creates
@@ -86,6 +96,7 @@ erDiagram
         string name
         smallint category_id FK
         smallint body_part_id FK
+        string measurement_kind
         string source_type
         text description
         boolean is_active

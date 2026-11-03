@@ -11,10 +11,11 @@ endpoints yet**. The examples below describe planned contracts, not working APIs
 | Document | Purpose | Status |
 |---|---|---|
 | [Initial API design](foundation.md) | User-action map, health checks, and exercise form choices | Proposal; needs human approval before implementation |
+| [Workout API design](workouts.md) | Approved timed Bodyweight, complete-template Save, and Cancel outcomes with proposed API contracts | Product choices approved; paths and remaining questions need review; no implementation |
 
-The initial design recommends four read-only endpoints. It also identifies the
-decisions needed before designing private exercises, templates, and workouts.
-It does not approve unresolved rules in the database design.
+The initial design recommends four read-only endpoints. The separate workout
+design covers later owner answers without changing those four endpoints.
+Neither document approves unresolved rules in the database design.
 
 The [observability design](../architecture/observability.md) uses Alloy
 and Mimir while keeping the shared OpenTelemetry package. It changes future

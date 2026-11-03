@@ -41,6 +41,17 @@ and applies the approved product rules. Database constraints add protection for
 stored data. Telemetry describes what happened; it is not the source of truth
 for workout records and must not change an operation's result when export fails.
 
+The owner later approved a timed Bodyweight exercise option, complete targets
+before a template is saved, and a Cancel choice for an active workout. The
+planned backend must validate a complete template before publishing it. A
+confirmed **Discard** deletes only the user's in-progress draft, including
+completed sets, in one database transaction. **Save** retains completed sets
+and marks unfinished sets and exercises cancelled in partial history. The
+database's one-active-workout index and terminal-history protection still
+apply. The [database design](../database/design.md#approved-follow-up-design-timed-bodyweight-template-save-and-cancel)
+and [workout API proposal](../api/workouts.md) explain the required new
+migration and open choices. The current code does not implement these changes.
+
 Example: when a user completes a set, the application records performance and
 starts rest according to the database design. A trace can show how long that
 operation took. Logs must not contain the user's lifting weight or credentials.

@@ -1,8 +1,10 @@
 erDiagram
-    %% Reviewed PR17 design; local migration implementation, not applied to owner database.
+    %% Reviewed PR17 foundation plus approved follow-up proposals; follow-up migration not written.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
+    %% exercises.measurement_kind and session_sets cancelled status are planned changes.
+    %% Confirmed Discard removes only an owned in-progress draft; terminal history remains protected.
     direction TB
     users ||--o{ user_identities : authenticates_with
     users ||--o{ custom_exercises : creates
@@ -61,6 +63,7 @@ erDiagram
         string name
         smallint category_id FK
         smallint body_part_id FK
+        string measurement_kind
         string source_type
         text description
         boolean is_active
