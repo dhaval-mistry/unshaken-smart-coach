@@ -83,14 +83,26 @@ def test_wrong_method_keeps_allow_header(client):
 
 def test_unexpected_failure_is_safe(client, monkeypatch):
     def broken(**_):
-        raise RuntimeError("password=hunter2 SELECT * FROM users")
+        raise RuntimeError(
+            "password=hunter2 SELECT * FROM users "
+            "postgresql://unshaken:secret@db.internal:5432/unshaken_smart_coach"
+        )
 
     # A controlled crash: make the route's response model raise.
     monkeypatch.setattr(health, "LiveResponse", broken)
     response = client.get("/health/live")
     assert_error(response, 500, "internal_error")
-    for private in ("hunter2", "SELECT", "Traceback", "RuntimeError"):
+    for private in (
+        "hunter2",
+        "SELECT",
+        "Traceback",
+        "RuntimeError",
+        "postgresql://",
+        "db.internal",
+        ":5432",
+    ):
         assert private not in response.text
+        assert private not in str(response.headers)
 
 
 def test_openapi_documents_exact_liveness_response(client):
