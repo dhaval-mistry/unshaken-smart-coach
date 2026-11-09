@@ -100,6 +100,10 @@ into `design.md` when the design is approved:
 - **One in-progress workout per user** (decision 6): the partial unique index
   `ux_workout_sessions_one_in_progress_per_user` rejects a second one. Completed
   and cancelled sessions are unlimited.
+- **Retained-row removal and source-link deletes** (decision 9): removed sets stay as rows
+  marked `removed_at`/skipped and are never physically deleted. Source-link and applied-template
+  foreign keys are RESTRICT, with `copied_from_template_id` SET NULL. Approved by the story
+  requester during review of this branch; the design owner should still record it in `design.md`.
 - **No duration/distance columns** (decision 4, deferred to a later migration). Completed sets require
   `actual_reps` unless the session exercise's category snapshot is `Cardio` or
   `Duration`, so those are not forced into reps. This relies on the lookup names
