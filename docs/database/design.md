@@ -346,5 +346,4 @@ Remaining decisions:
 
 ## Implementation status
 
-Documentation only. No SQL, migration, application code, cloud resources or PostgreSQL tables were created by this package. Implement only approved rules through versioned migrations using the existing PostgreSQL 17 and uv workflow after remaining decisions are resolved. The previously linked codex-handoff.txt is not present in this repository.
-
+Migration `0001` (see [migrations.md](migrations.md)) creates the 13 tables in this design in an empty PostgreSQL 17 database. This design is still a proposal: the open decisions above have not been approved by a human. The migration therefore makes provisional choices, listed under "Implementation notes and unresolved design points" in [migrations.md](migrations.md), which need approval or change before the schema is treated as final. Master records, APIs, authentication, ExerciseDB import and cloud resources are not part of this work. The previously linked codex-handoff.txt is not present in this repository.

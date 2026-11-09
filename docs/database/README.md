@@ -1,8 +1,9 @@
 # Database design
 
-Draft for team review. No migrations are included.
+Draft for team review. Migration `0001` creates the 13 tables; see [migrations](migrations.md).
 
 - [Detailed design](design.md)
+- [Migrations: commands, tests and rollback limits](migrations.md)
 - [Rendered ER diagram](er-diagram.md)
 - [Mermaid source](er-diagram.mmd)
 

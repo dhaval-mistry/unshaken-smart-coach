@@ -5,9 +5,10 @@ Python version, virtual environment, dependencies, and locked dependency
 versions, so contributors do not need to manage a project environment with
 `pip` and `venv` separately.
 
-> **Current status:** The backend application and `pyproject.toml` have not
-> been scaffolded yet. You can install and verify uv now. The project commands
-> later in this guide will work after the backend foundation is added.
+> **Current status:** `backend/` contains `pyproject.toml`, `uv.lock` and the
+> database migration tooling only. The FastAPI application has not been added,
+> so `fastapi dev` below does not work yet. See
+> [database migrations](../database/migrations.md).
 
 ## Prerequisites
 
@@ -16,7 +17,7 @@ versions, so contributors do not need to manage a project environment with
 - The local PostgreSQL service described in [postgresql.md](postgresql.md).
 - uv.
 
-The supported Python version will be declared by the backend's
+The supported Python version (3.12) is declared by the backend's
 `pyproject.toml` and `.python-version`. Do not select a different project
 version independently. uv can install the required Python version when the
 backend is initialized.
@@ -87,10 +88,11 @@ Run backend tests:
 uv run pytest
 ```
 
-Apply database migrations:
+Review, then apply, database migrations (the owner must approve the target):
 
 ```text
-uv run alembic upgrade head
+uv run python -m app.db plan
+uv run python -m app.db upgrade --approve-target HOST:PORT/DATABASE
 ```
 
 The exact commands may be refined when the backend is scaffolded. At that
