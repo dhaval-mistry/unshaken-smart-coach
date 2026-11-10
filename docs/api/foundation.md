@@ -1,7 +1,8 @@
 # Initial API design
 
-Design status: **PROPOSED FOR REVIEW**. The owner requested an initial design;
-the contracts and recommendations here still need human approval.
+Design status: **proposed architecture for review**, retaining the product and
+HTTP requirements already recorded in issues #12–15. New technical mechanisms
+and private-route contracts require review; existing approvals are not reopened.
 
 Implementation status: **Partially implemented**. The FastAPI application,
 shared response and error behavior, and `GET /health/live` exist (issue #12).
@@ -12,7 +13,8 @@ Related context: [system overview](../architecture/overview.md),
 [observability design](../architecture/observability.md), and
 [backend setup](../setup/backend.md). The owner's later approved workout
 choices and proposed contracts are in [workout API design](workouts.md).
-Existing API stories are tracked in GitHub.
+The [API index](README.md) maps all open API issues and #30 to their canonical
+designs; [exercise APIs](exercises.md) cover provider search and custom creation.
 
 ## Start with user actions
 
@@ -27,7 +29,7 @@ The other actions below show the next design steps, not approved API contracts.
 | Open the New exercise form | Load active categories and body parts | Detailed below; needs approved seeds |
 | Browse or search exercises | Return provider exercises and only this user's private exercises | Later; needs verified identity, provider mapping, and search rules |
 | Save a custom exercise | Save name, category, body part, and creator together | Later; needs verified identity and approved database enforcement |
-| Create or change a workout template | Save an ordered plan with at least one exercise and complete targets | Later; zero-set exercise and editing rules remain open |
+| Create or change a workout template | Save an ordered plan with at least one exercise and at least one valid set per included exercise | Approved completeness; proposed API in workouts.md |
 | Start a workout from a template or without one | Capture a complete starting plan without changing the source | Later; one active workout is approved; ad hoc request details remain open |
 | Record a set and start rest | Save actual performance and start rest once, including on retry | Later; follow approved measurement rules and decide timer changes |
 | Finish a workout | Save history, then handle the explicit template-update choice | Later; needs update mapping, conflict, and retry decisions |
@@ -56,12 +58,16 @@ migration revision are separate checks; none substitutes for the others.
 
 ## Common request and response rules
 
-These are recommendations for this first slice, not existing conventions:
+Issue #12's common response behavior and liveness are implemented. The same
+requirements apply to proposed foundation endpoints; additional private-route
+transport choices remain proposals. The following no-input rules apply to the
+four foundation GET routes, not to every later API's declared body/query fields:
 
 - Use `/api/v1` for application APIs; keep operational health paths unversioned.
-- No sign-in is proposed for these four non-personal endpoints in local
-  development. This needs approval and grants no access to private data or
-  permission to expose a deployment publicly. Private APIs need a later access design.
+- No sign-in is required for these four non-personal health/lookup endpoints,
+  as specified in their stories. This grants no access to private data or
+  permission to expose a deployment publicly. Private APIs need the identity
+  boundary described below.
 - Requests have no body, path parameters, or supported query parameters.
   Reject a nonempty body or any query parameter with `422 invalid_request`.
   Do not add filtering, pagination, or an inactive-record option in this slice.
@@ -69,12 +75,52 @@ These are recommendations for this first slice, not existing conventions:
   caching initially so changed choices appear on the next form load.
 - Generate an opaque UUID request ID for each request. Return it in
   `X-Request-ID` on successes and errors; also include it in error JSON. It is
-  for support and log correlation, never authorization. Do not trust incoming
+  for support and future safe log correlation, never authorization. Returning
+  an ID does not mean current server tracebacks contain it. Do not trust incoming
   request IDs as identity or confuse them with OpenTelemetry trace IDs.
 - An item has exactly `id` (integer), `name` (string), and `sort_order`
   (integer). Return stable database IDs; callers must not use names as keys.
   Display names can change without changing the record's identity.
 - GET requests must not write data. Repeated requests do not duplicate seeds.
+
+Application paths match exactly: slash variants use safe JSON 404 rather than
+empty redirects. Built-in `/docs` serves HTML; it is not an application JSON
+endpoint. Every JSON response uses the shared headers. Application errors use
+one envelope; future dependency errors must be registered in OpenAPI explicitly,
+not assumed to appear automatically from exception handlers.
+
+### Private access and error boundary
+
+**Proposal for all #21–29 private routes:** validate Google/Microsoft issuer,
+signature, audience, expiry and stable subject at a separately approved identity
+boundary. Resolve that verified identity to the application's user; never use a
+submitted user ID, request ID, CORS origin, email alone or development header as
+proof. Account linking, bearer versus application-session transport, refresh/
+revocation and any additional session storage remain D8 in the
+[decision table](workouts.md#owner-decisions-and-approval-checklist). Existing
+`users`/`user_identities` do not implement sign-in by themselves.
+
+The trusted service supplies the verified user to database operations; clients
+do not connect to PostgreSQL. Filter/lock by that owner in every private read
+and write, including child resources and bulk plan entries. Do not first reveal
+a foreign row and reject it afterward. Proposed error rule: unauthenticated
+requests use `401 authentication_required`; unknown and inaccessible private
+IDs share `404 not_found` without revealing their existence. A request-supplied
+owner field is unsupported input, not a way to select a different identity.
+If cookie sessions are chosen, specify CSRF/origin protection as part of that
+auth design; CORS does not substitute for either authentication or CSRF control.
+
+Validate declared fields/types/bounds and reject unknown fields before use.
+Use decimal representations for exact numeric values and ISO-8601 UTC event
+timestamps. Domain conflict/validation codes in the exercise/workout designs
+are proposals using the same safe envelope. Do not echo rejected values in
+responses/logs or expose generated driver exceptions. Expected connection/
+deadline failure maps to `503 database_unavailable`; programming failures stay
+`500 internal_error`, without mislabelling every failure a database outage.
+
+No private route becomes ready just because its schema exists. Link an approved
+authentication story before implementing private scope, without implementing
+new account/session tables inside each workout feature.
 
 ### Shared errors
 
@@ -109,7 +155,8 @@ an unlimited loop; allow a person to retry a failed form load.
 FastAPI allows custom handlers for HTTP and request-validation errors; the
 Developer must implement and verify the agreed format, including unexpected
 errors. See the [official error-handling guide](https://fastapi.tiangolo.com/tutorial/handling-errors/).
-The envelope above is our proposal, not FastAPI's default response.
+The safe envelope is implemented for #12, not FastAPI's default response.
+The 503 dependency cases above remain future implementation work.
 
 ## Check the running backend
 
@@ -131,7 +178,7 @@ unnecessary restarts. It does not prove the application is ready to serve data.
 
 Readiness performs bounded, read-only reads of both lookup tables using the
 normal database connection pool. Require at least one active choice in each
-table. Propose a total database-check deadline of three seconds, including
+table. Require a total database-check deadline of three seconds, including
 connection acquisition and query execution. Release connections on success,
 failure, and cancellation. Missing tables, empty active lists, or database
 unavailability return the corresponding shared `503` error.
@@ -141,6 +188,40 @@ are at head. The separate migration command and database verification must
 prove those. No startup or health handler runs migrations, creates tables, or
 inserts missing seeds. Neither health endpoint depends on ExerciseDB, AI
 services, Alloy, Grafana, Loki, Mimir, or Tempo.
+
+### Database deadlines and connection ownership
+
+**Technical proposal for #13/#14:** own one bounded database engine/pool per
+application process using the existing SQLAlchemy/Psycopg/root-environment
+boundary. Construct it lazily or in lifespan without requiring a successful
+database connection to serve liveness. Do not construct a pool per request.
+Migration/script processes retain their own isolated lifecycle; API requests
+do not run migration commands. Dispose the application pool at shutdown.
+
+Measure one monotonic deadline from request check start. The three-second #13
+budget includes pool wait, physical connect, lock/read statements and response
+decision, not three seconds for each stage. Allocate only the remaining budget.
+Use short read-only queries (existence of one active row each), not a scan of
+all schema/seed values. A missing table/empty list is reference-data unavailable;
+a dead/slow connection is database unavailable. Release/rollback every acquired
+connection on success, failure, timeout and request cancellation; invalidate a
+connection if driver cancellation leaves its state uncertain.
+
+The current synchronous `database_engine()` helper has a five-second connect
+timeout and does not itself establish this request-wide API deadline. It must
+not be advertised as meeting #13 unchanged. Proposed implementation direction:
+use a cancellation-aware pool/driver execution boundary, keeping SQLAlchemy
+Core and Psycopg rather than adding an unrelated database stack. If async access
+is selected, reuse one process-scoped async pool and existing settings; if sync
+execution is retained, bound worker concurrency and prove the underlying driver
+operation stops/releases on timeout. Cancelling only an awaiting thread task is
+insufficient when its database operation continues holding a connection.
+
+The final implementation plan must select/test its concrete driver/pool strategy
+against pool exhaustion, slow connection, slow read and client cancellation.
+#14 should reuse that boundary and a proposed three-second total read deadline,
+without silently extending #13's readiness budget. Timings and pool-release
+evidence are acceptance gates, not claims proved by this document.
 
 ## Load choices for the New exercise form
 
@@ -244,6 +325,29 @@ lookup-data, and database-readiness rules in this API proposal.
   Integration evidence must show synthetic lookup requests reaching the agreed
   stores when the observability implementation is available.
 
+For #15, instrument actual #13/#14 application reads, not just synthetic demo
+routes. A successful lookup and controlled failure need request/duration metrics,
+safe structured logs and traces including a real successful database-read span.
+Return request ID → safe log field → trace ID → Tempo must be demonstrated;
+current response IDs alone do not implement this correlation. Verify actual
+converted metric names/units/labels in Mimir and links from Loki to Tempo.
+
+Safe logging is also a #13 acceptance requirement and cannot wait for #15's
+store-delivery work. The shared allowlisted event helper does not sanitize every
+Uvicorn/driver logger. Proposed boundary: explicitly configure server and
+application exception logging to omit raw exception messages, SQL/parameters,
+connection URLs and inputs; retain safe failure category, request ID and
+reviewed diagnostic metadata. Do not attach raw `exc_info` to exported records.
+Test captured process/server logs with synthetic sensitive exception text,
+including when telemetry is disabled. Do not globally hide all errors as a
+substitute for safe diagnostic events.
+
+Preserve approved three-day logs/metrics and 24-hour traces, the existing single
+Alloy metrics route, and application OTLP logs only. No Docker socket/container
+collection or PostgreSQL-monitoring schema is added. Verify outage/recovery,
+bounded shutdown and new-signal recovery honestly; no promise of unlimited
+outage delivery. See the canonical observability design for store ownership.
+
 ## Validation expected from implementation
 
 These are future checks, not results from this documentation task:
@@ -269,16 +373,17 @@ Record exact commands, commit, results, and limitations in the implementation PR
 
 ## Decisions for review and Product Owner handoff
 
-Human review is needed on the proposed first slice and no-sign-in policy for
-its non-personal local endpoints. The versioned paths, response shape, error
-codes, request IDs, three-second database deadline, and initial no-cache choice
-are technical recommendations to approve with this design.
+Human review is needed on the new technical execution, private identity and
+safe logging proposals. Public no-sign-in health/lookup behavior, exact shared
+response requirements and #13's three-second total deadline are already stated
+in their stories; do not reopen them as missing product choices.
 
 Keep the database's remaining decisions in its
 [decision list](../database/design.md#remaining-future-decisions-and-review-boundary).
-This document resolves none of them. Identity design is needed before private
-exercise APIs; [workout design](workouts.md) records later approved behavior
-and its still-open contracts.
+The owner has since resolved minimum-one-set completeness; this revision records
+that answer without deciding the other open behaviors. Identity design is needed
+before private exercise APIs; [workout design](workouts.md) records the remaining
+decisions and [exercise design](exercises.md) the provider-retention gate.
 
 After human approval, a separately requested Product Owner can review the
 existing issues covering:
