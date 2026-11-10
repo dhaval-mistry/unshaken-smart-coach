@@ -7,8 +7,10 @@ The [Alloy/Mimir observability direction](observability.md) is approved, includi
 local Mimir filesystem storage and initial application-only log collection.
 Docker container-log collection is deferred.
 
-Implementation status: **Application not started**. This document does not
-create application code, packages, services, or database tables.
+Implementation status: **Application foundation started**. A minimal FastAPI
+application with a liveness check exists; product endpoints do not. This
+document does not create application code, packages, services, or database
+tables.
 
 Related work: [Database foundation](https://github.com/dhaval-mistry/unshaken-smart-coach/milestone/1)
 and [Local observability foundation](https://github.com/dhaval-mistry/unshaken-smart-coach/milestone/2).
@@ -20,7 +22,9 @@ The repository contains project/design/setup documents, agent definitions and
 their generator/tests, UI reference images, and a root Compose file defining
 PostgreSQL 17. The backend contains database migrations, schema and tests.
 The shared Python telemetry package and synthetic FastAPI/script examples are
-implemented. Product API endpoints and React remain future work.
+implemented. A minimal FastAPI application (`backend/app/main.py`) provides
+`GET /health/live` and the shared response and error behavior. Product API
+endpoints and React remain future work.
 
 ## Planned components
 

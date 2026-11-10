@@ -3,8 +3,9 @@
 The database foundation uses **Python 3.12**, uv, SQLAlchemy Core, Psycopg 3,
 and Alembic. `backend/.python-version` selects the Python minor version;
 `backend/pyproject.toml` declares dependencies and `uv.lock` locks them.
-The verified interpreter was Python 3.12.10 on Windows. No FastAPI application
-or application endpoints are included yet.
+The verified interpreter was Python 3.12.10 on Windows. A minimal FastAPI
+application with a liveness check is available; see
+[Run the API locally](#run-the-api-locally).
 
 The shared Python telemetry package and synthetic FastAPI/script examples are
 now available. Product endpoints remain separate work. See
@@ -118,6 +119,63 @@ match. A conflicting ID/name/order/value stops the migration without replacing
 custom data. Fix conflicts through a separately reviewed change; do not edit an
 already applied migration or reset the volume.
 
+## Run the API locally
+
+From `backend/`, start the FastAPI application:
+
+```text
+uv run uvicorn app.main:app --reload
+```
+
+It serves `http://127.0.0.1:8000`. The generated OpenAPI documentation is at
+`/docs`, and the raw schema at `/openapi.json`. `--reload` restarts the server
+when Python files change; restart it manually after editing `.env`.
+
+Check liveness:
+
+```text
+curl -i http://127.0.0.1:8000/health/live
+```
+
+Expect `200` with `{"status":"alive"}`, a server-generated UUID in
+`X-Request-ID`, and `Cache-Control: no-store`. Liveness only confirms the
+process can answer: it does not contact PostgreSQL, exercise providers, AI, or
+telemetry stores, so it still returns `200` when they are unavailable. Startup
+does not run migrations, create tables, or load seeds.
+
+Telemetry starts once at application startup through `app.telemetry`. When the
+observability stack is not running, export attempts fail in the background and
+log connection warnings without changing HTTP responses. To silence them during
+local development, set `OTEL_SDK_DISABLED=true` in your private root `.env`.
+
+Errors use the shared envelope from the
+[initial API design](../api/foundation.md#shared-errors), with `422`
+`invalid_request`, `404` `not_found`, `405` `method_not_allowed` (with `Allow`),
+and `500` `internal_error`. Error messages never include submitted input,
+stack traces, or connection details.
+
+Paths are matched exactly. A trailing slash such as `/health/live/` returns the
+shared JSON `404 not_found` instead of redirecting. The generated OpenAPI
+document at `/openapi.json` (shown as interactive docs at `/docs`) lists the
+liveness `200`, `422` and `500` responses with the shared error schema and
+headers; app-wide `404` and `405` behavior is described in its API description,
+shown at the top of `/docs`.
+
+### HTTP contract tests
+
+These tests need no database or observability stack. From `backend/`:
+
+```text
+uv run pytest tests/api tests/telemetry -q
+```
+
+They call the application in-process with FastAPI's `TestClient`. Telemetry
+startup is replaced with no-op functions, except one test that runs real
+telemetry against an unreachable endpoint in a separate process. Another test
+confirms that importing and calling the application never loads database code.
+Running plain `uv run pytest` also collects the PostgreSQL integration tests
+below, which require `TEST_DATABASE_URL`.
+
 ## Testing without touching development data
 
 From `backend/`, the repeatable verification runner creates a uniquely labeled
@@ -191,8 +249,8 @@ these guards are not authentication or a substitute for least-privilege roles.
 
 Package resources/migrations currently run from a repository checkout, not as a
 standalone deployed wheel. Runtime checks were on Windows/Docker Desktop;
-other operating systems were not exercised in this task. API integration and
-FastAPI remain separate implementation stories.
+other operating systems were not exercised in this task. Database-backed API
+endpoints remain separate implementation stories.
 
 ## Local verification evidence
 
