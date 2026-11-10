@@ -155,10 +155,11 @@ and `500` `internal_error`. Error messages never include submitted input,
 stack traces, or connection details.
 
 Paths are matched exactly. A trailing slash such as `/health/live/` returns the
-shared JSON `404 not_found` instead of redirecting. The OpenAPI document at
-`/docs` lists the liveness `200`, `422` and `500` responses with the shared
-error schema and headers; app-wide `404` and `405` behavior is described in
-the API description at the top of that page.
+shared JSON `404 not_found` instead of redirecting. The generated OpenAPI
+document at `/openapi.json` (shown as interactive docs at `/docs`) lists the
+liveness `200`, `422` and `500` responses with the shared error schema and
+headers; app-wide `404` and `405` behavior is described in its API description,
+shown at the top of `/docs`.
 
 ### HTTP contract tests
 
