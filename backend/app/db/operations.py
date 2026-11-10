@@ -33,6 +33,42 @@ def complete_set(connection, set_id, user_id, **actuals):
     return dict(connection.execute(sa.text(statement),dict(actuals,id=set_id)).mappings().one())
 
 
+def save_cancelled_session(connection, session_id, user_id):
+    """Retain completed work and cancel pending sets in one caller transaction.
+
+    This internal primitive requires a service-supplied verified owner. It does
+    not authenticate callers, choose template mapping, or commit independently.
+    Dirty pending performance is a conflict, never silently erased. The shared
+    lock orders this operation against set completion and active-draft discard.
+    """
+    connection.exec_driver_sql("SELECT pg_advisory_xact_lock(746231901)")
+    workout = connection.execute(sa.text(
+        "SELECT * FROM workout_sessions WHERE id=:id AND user_id=:user FOR UPDATE"
+    ), {"id": session_id, "user": user_id}).mappings().one_or_none()
+    if workout is None or workout["status"] != "in_progress":
+        raise ValueError("Only the owner active workout can be cancelled.")
+    connection.execute(sa.text(
+        "UPDATE session_sets s SET status='cancelled' FROM session_exercises e "
+        "WHERE s.session_exercise_id=e.id AND e.session_id=:id AND s.status='pending'"
+    ), {"id": session_id})
+    return dict(connection.execute(sa.text(
+        "UPDATE workout_sessions SET status='cancelled',finished_at=clock_timestamp() "
+        "WHERE id=:id RETURNING *"
+    ), {"id": session_id}).mappings().one())
+
+
+def discard_active_session(connection, session_id, user_id, *, confirmed=False):
+    """Discard only the explicitly confirmed owner's active draft atomically.
+
+    The scoped database function performs its own status/owner check and child
+    deletion. No caller-set flag grants ordinary writers delete permission. The
+    caller owns the transaction, so a later failure restores the entire draft.
+    """
+    connection.execute(sa.text(
+        "SELECT usc_discard_active_session(:id,:user,:confirmed)"
+    ), {"id": session_id, "user": user_id, "confirmed": confirmed})
+
+
 @contextmanager
 def locked_template_update(connection, session_id, user_id):
     """Check source version before a later approved mapping operation changes the plan.

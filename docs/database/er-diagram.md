@@ -3,8 +3,9 @@
 Design basis: **Reviewed PR #17**, followed by local implementation of stories
 #3/#4 and the owner's later approved timed-Bodyweight, complete-template-Save,
 and Cancel choices. See the [detailed design](design.md) and
-[setup guide](../setup/backend.md). The model retains 13 tables. The later
-approved changes require a new migration and are not in the current schema.
+[setup guide](../setup/backend.md). The model retains 13 tables. Migration 0003
+implements the approved database follow-up; workout APIs remain
+separate work. Saved templates require at least one valid set per exercise.
 The owner's existing database is not migrated by this document.
 
 This diagram shows live foreign keys. Immutable original UUID columns
@@ -13,12 +14,12 @@ original identity, starting plan, and completed performance remain stored.
 Exercise deletion does not cascade into reusable plans; explicit removal/
 replacement of live plan references is proposed before catalog deletion.
 
-A unique partial index enforces one in-progress workout per user. The planned
+A unique partial index enforces one in-progress workout per user. The
 `exercises.measurement_kind` chooses the effective kind for each exercise;
 Bodyweight may use reps or duration. The category kind remains the usual
 default, while the immutable session snapshot protects past performance.
 Targets, starting snapshots, and actuals remain separate; weight stays
-optional. The planned `cancelled` set status identifies unfinished sets in a
+optional. The `cancelled` set status identifies unfinished sets in a
 saved partial workout. A confirmed Discard removes only an in-progress draft;
 terminal session history stays protected. Template Save requires at least one
 exercise and complete targets, a rule the ER diagram alone cannot express.
@@ -32,11 +33,11 @@ deletion, chronology or immutability guards; the design explains them.
 
 ```mermaid
 erDiagram
-    %% Reviewed PR17 foundation plus approved follow-up proposals; follow-up migration not written.
+    %% Reviewed PR17 foundation and issue30 follow-up implemented through migration 0003.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
-    %% exercises.measurement_kind and session_sets cancelled status are planned changes.
+    %% Saved templates require exercises and at least one valid set per exercise.
     %% Confirmed Discard removes only an owned in-progress draft; terminal history remains protected.
     direction TB
     users ||--o{ user_identities : authenticates_with
@@ -47,9 +48,9 @@ erDiagram
     body_parts ||--o{ exercises : classifies
     exercises ||--o| provider_exercises : provider_details
     exercises ||--o| custom_exercises : custom_details
-    workout_templates ||--o{ template_exercises : contains_live_plan
+    workout_templates ||--|{ template_exercises : contains_live_plan
     exercises ||--o{ template_exercises : requires_live_reference
-    template_exercises ||--o{ template_sets : plans
+    template_exercises ||--|{ template_sets : plans
     workout_templates o|--o{ workout_sessions : live_source
     workout_templates o|--o{ workout_sessions : live_applied_target
     workout_templates o|--o{ workout_templates : live_copy_source

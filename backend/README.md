@@ -1,13 +1,16 @@
 # Backend
 
 The local database foundation now uses Python 3.12, uv, SQLAlchemy Core,
-Psycopg 3, and Alembic. There is no FastAPI application or application API yet.
+Psycopg 3, and Alembic. The FastAPI foundation exposes `/health/live`;
+workout APIs remain separate work.
 
 - `app/db/schema.py`: the 13-table metadata.
 - `app/db/config.py`: existing private root DATABASE_URL settings.
 - `app/db/cli.py`: nonsecret target/revision preview and confirmed upgrade.
-- `app/db/operations.py`: small transactional capture/completion/version-lock primitives; not APIs or authentication.
-- `migrations/`: frozen schema/guard SQL and separate versioned master seeds.
+- `app/db/operations.py`: transactional capture/completion/version-lock and
+  cancel/discard primitives; not APIs or authentication.
+- `migrations/`: frozen foundation/master-seed revisions and the `0003`
+  effective-measurement, complete-template, and cancellation follow-up.
 - `tests/`: database integration checks and shared telemetry unit tests.
 - `app/telemetry/`: opt-in shared logs, metrics and spans for future API and script callers.
 - `examples/`: [synthetic API and script examples](examples/README.md), with no database changes.
@@ -35,9 +38,8 @@ finally:
     shutdown()
 ```
 
-A future FastAPI application should call the same initialization and shutdown
-functions once in its application lifespan and use the same helpers in handlers.
-The API itself is not implemented here.
+The FastAPI application calls the same initialization and shutdown functions
+once in its lifespan. Future workout handlers reuse these helpers.
 
 Supported event names are `operation.started`, `operation.completed` and
 `operation.failed`. Supported operations are `database`, `lookup`, `request`,

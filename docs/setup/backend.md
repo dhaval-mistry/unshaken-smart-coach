@@ -72,9 +72,21 @@ For a fresh database the normal plan is:
    timestamp/ownership/history/snapshot/measurement guards.
 2. `0002_master_records`: stable 8 categories and 11 body parts, including
    explicit None and category measurement kinds.
+3. `0003_workout_follow_up`: effective exercise kinds (including timed
+   Bodyweight), complete saved templates, cancelled sets and protected partial
+   history, plus narrowly scoped confirmed active-draft discard.
 
 Alembic also owns its separate `alembic_version` tracking table. That is not
 a fourteenth application table.
+
+Revision 0003 backfills only the new exercise kind from the existing category;
+it preserves prior timestamps, snapshots, actuals, seeds and earlier migration
+files. It refuses existing incomplete templates (including zero-set exercises)
+and cancelled sessions with pending sets. An incompatible legacy Bodyweight
+category kind also blocks the backfill. Resolve conflicts through an approved
+data correction outside this migration; it never invents targets or removes
+history. A failed upgrade leaves the old revision and data intact. The setup
+does not authorize modifying the owner's development database.
 
 **For an existing/local/shared target, show the plan to its owner and obtain
 that target's approval first.** After approval of the displayed target and plan:
@@ -232,12 +244,28 @@ source detachment, and timestamp chronology with constraints and triggers.
 Capture must insert initial rows and seal its snapshot in one transaction.
 See the [design](../database/design.md) for the JSON contract and deletion rules.
 
-`app.db.operations` supplies three internal primitives: seal capture, complete
+`app.db.operations` supplies internal primitives: seal capture, complete
 once with a stable server timer, and lock/check a template's captured version
 **before** a future optional-update mapping operation. Source-version comparison
 and mapping must use that transaction primitive; row guards alone cannot infer
 the exact mapping/retry behavior of a future API. Completed history is committed
 before that optional transaction. No workout API or template mapping is supplied.
+
+The follow-up adds `save_cancelled_session` and `discard_active_session`.
+These run in the caller's transaction and require a trusted service to supply a
+verified owner; supplying a UUID is not authentication. Save cancels pending
+sets without changing completed actuals/events or skipped sets. Discard requires
+explicit confirmation and removes only the owner's active draft, never terminal
+history. The security-definer SQL operation uses a fixed search path and the
+write guard checks its owner identity as well as the exact parent gate, so an
+ordinary writer cannot enable deletion with a caller-set flag. A privileged
+database owner can still alter or disable guards; this is not a protection from
+an administrator or a complete application role/authentication design.
+
+Rollback of revision 0003 remains disposable-only. It also refuses timed kinds
+or cancelled-set history that revision 0002 cannot represent; it does not
+rewrite those records to force a downgrade. Prior 0001/0002 rollback guards and
+target confirmation remain unchanged.
 
 For this initial foundation, a transaction advisory lock serializes guarded
 writes, and deferred guards inspect the database state at transaction end.
@@ -252,7 +280,33 @@ standalone deployed wheel. Runtime checks were on Windows/Docker Desktop;
 other operating systems were not exercised in this task. Database-backed API
 endpoints remain separate implementation stories.
 
-## Local verification evidence
+## Workout follow-up verification (issue #30)
+
+The successor migration was verified on new, uniquely labeled disposable
+PostgreSQL 17 containers with temporary data storage. Each test container was
+removed afterward. Existing development/shared databases and volumes were not
+used or migrated. The implementation commit and PR contain the final evidence.
+
+Commands used the existing Python 3.12.10 virtual environment with bytecode
+disabled; no dependencies were installed or changed:
+
+| Command | Result |
+|---|---|
+| From `backend/`: `.venv/Scripts/python.exe -B scripts/verify_database.py` | 157 backend tests passed; fresh and representative-data upgrades, conflicts/rollback/history/concurrency verified; revision `0003_workout_follow_up`; no schema drift; test container removed |
+| From root: `backend/.venv/Scripts/python.exe -B -m unittest discover -s tests -v` | 10 passed; Docker configuration checks required access outside the sandbox |
+| From root: `backend/.venv/Scripts/python.exe -B scripts/sync_agents.py --tool all --check` | 5 roles / 10 generated files checked; no drift |
+| `git diff --check` and frozen revision comparison | No whitespace errors; existing 0001/0002 migration files unchanged |
+
+One existing Starlette/httpx deprecation warning remains. These are database
+and foundation checks, not workout API, authenticated-user, provider, production
+deployment or live observability-store verification. The scoped SQL discard
+function is not authentication. No template-update mapping from issue #26 was
+implemented. The first populated-upgrade check exposed deferred trigger events
+before `ALTER TABLE`; the final migration flushes those events first and the
+preservation/rollback checks pass. An initialization-server readiness race was
+also corrected with a bounded probe of the actual disposable TCP endpoint.
+
+## Earlier foundation verification evidence
 
 Verified uncommitted working tree on `feature/database-foundation-local`, based
 on main `c42d624`. No commit or GitHub publication was made by this task.

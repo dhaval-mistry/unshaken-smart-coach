@@ -111,8 +111,9 @@ for duration kind, positive duration; for reps kind, positive reps. It does not
 insert a partly valid template. An edit also checks its expected version and
 preserves history. `422 incomplete_template` identifies missing fields;
 `403 forbidden` or `404 not_found` protects private exercise ownership;
-`409 version_conflict` handles a concurrent edit. The exact rule for a
-zero-set exercise remains open, so this contract cannot yet be marked ready.
+`409 version_conflict` handles a concurrent edit. The owner confirmed for issue #30 that every included exercise requires at
+least one set with valid targets on both initial saves and later updates. This
+settles that rule; proposed API paths and remaining questions still need review.
 
 ### Start and cancel an active workout
 
@@ -198,10 +199,10 @@ Do not apply the new migration to a participant's existing or shared database
 without the separate target review and authorization described in the setup
 guide. No real vendor or model requests are needed for these checks.
 
-## Questions still needing a decision
+## Decision record and remaining questions
 
-1. Must every template exercise contain at least one set? This is the
-   recommended interpretation of “all necessary targets before Save.”
+1. Resolved for issue #30: every saved template exercise must contain at
+   least one valid set, including on later updates.
 2. Should Cancel then Save be offered when no sets were completed, or should
    that case offer Discard only? The schema can represent either.
 3. Should a saved partial workout offer the same optional source-template

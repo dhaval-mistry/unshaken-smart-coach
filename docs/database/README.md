@@ -3,25 +3,25 @@
 The reviewed design from [PR #17](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/17)
 is implemented locally for stories #3 and #4 using Python 3.12, uv,
 SQLAlchemy Core, Psycopg 3, and Alembic. No changes have been applied to the
-owner's existing development database. Local changes are not committed or
-published by this task.
+owner's existing development database. Existing/shared database upgrades require separate target approval.
 
 - [Design and confirmed requirements](design.md)
 - [ER diagram](er-diagram.md) and [matching Mermaid source](er-diagram.mmd)
 - [Verified setup and migration commands](../setup/backend.md)
 
-The current 13 application tables contain 128 columns. Alembic has its separate
-revision-tracking table. Two migrations create the schema/guards and install
+The current 13 application tables contain 129 columns. Alembic has its separate
+revision-tracking table. Revisions 0001/0002 create the schema/guards and install
 stable master data: eight categories and eleven body parts, including None.
 
-In the current migration, Cardio requires time and distance, Duration requires
-time, and the other six categories require reps. The owner later approved
-duration-only Bodyweight exercises, complete templates before Save, and a
-Cancel choice: save completed work as partial history or discard an active
-draft after warning that completed work will be deleted. These changes need a
-new migration and API work; they are **not yet implemented**. Weight remains
-optional. One workout per user may be in progress. Permanent source deletion
-keeps retained history. Completed and saved-partial history remains protected.
+Successor migration `0003_workout_follow_up` adds effective exercise measurement
+kinds: Bodyweight may use reps or duration; other categories retain their kind.
+Saved templates require at least one exercise and one valid set per exercise.
+Cancel then Save retains completed work and cancels pending sets; confirmed
+Discard removes only an owned active draft. Completed and saved-partial history
+remains protected. Workout APIs are separate work. Weight remains optional,
+one active workout per user is enforced, and permanent source deletion keeps
+retained history. Existing incomplete templates or cancelled sessions with
+pending sets block migration rather than being silently repaired.
 
 Validation uses fresh disposable PostgreSQL 17 databases and synthetic data.
 Checks cover schema/keys/indexes/seeds, measurement/ownership/source failures,

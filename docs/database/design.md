@@ -3,14 +3,14 @@
 Design basis: **Reviewed and merged through PR #17**, followed by the owner's
 instruction to implement stories #3 and #4 against that design. Confirmed
 product answers are retained below. The later timed-bodyweight, template-save,
-and Cancel decisions below are **approved design changes, not implemented
-database behavior**. Remaining API decisions stay deferred.
+and Cancel decisions below are **implemented by successor migration
+`0003_workout_follow_up`**. Remaining API decisions stay deferred.
 
-Implementation status: **The existing SQLAlchemy/Alembic foundation implements
-the earlier rules; the later approved changes need a new migration and API work**.
+Implementation status: **SQLAlchemy/Alembic revisions 0001-0003 implement the database
+rules below; workout APIs remain separate work**.
 It has not been applied to the owner's existing database. PostgreSQL
 17 setup was merged through [PR #16](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/16).
-This revision starts from main `9b38ce9cdcad468a8a2cac302125c4c346523adc`.
+Issue #30 implementation is based on main `a4cafb8c76fc7e33939de9bc4072a64e46c5ebc5`.
 It does not connect to or change any database.
 
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
@@ -121,9 +121,10 @@ missing weight stays NULL rather than being silently converted to zero.
 ### Approved follow-up design: timed Bodyweight, template Save, and Cancel
 
 These rules supersede the earlier reps-only Bodyweight, permissive template
-Save, and no-active-session-delete rules **for future implementation**. The checked-in
-`0001`/`0002` migrations still enforce those earlier rules today. Add a new
-versioned migration; never edit an applied migration in place.
+Save, and no-active-session-delete rules. Successor revision
+`0003_workout_follow_up` implements the database changes without altering the
+frozen `0001`/`0002` migrations. No existing/shared database is upgraded by
+this change; application requires separate target approval.
 
 ```mermaid
 flowchart LR
@@ -137,17 +138,17 @@ flowchart LR
 **Template Save.** A save operation checks the complete template in one
 transaction. It rejects zero exercises, missing exercise identity/name or
 classification, missing required target values for the selected measurement
-kind, nonpositive targets, and incompatible fields. The current tables allow
-blank targets. The proposed first implementation holds incomplete edits in
+kind, nonpositive targets, and incompatible fields. Earlier revisions allowed
+blank targets. The initial implementation holds incomplete edits in
 the client and writes the template plus all children atomically at Save. The
 service validates the full plan and a deferred database guard checks the
 committed template, including edits/deletion of its last exercise or required
 target. A partial transaction cannot leave a published incomplete template.
 If stored drafts are later wanted, they need an explicit draft/published state
 and guards that prevent an incomplete draft being started. The owner has not
-selected a stored-draft feature. Whether every exercise must contain at least
-one set is still an explicit question below; do not claim a zero-set exercise
-is an approved complete template.
+selected a stored-draft feature. The owner confirmed during issue #30
+implementation that every included exercise must contain at least one set with valid targets, on both initial Save
+and subsequent updates. Incomplete stored drafts are not supported.
 
 **Cancel then Discard.** The client first warns that completed reps, durations,
 weights, and rest records in this active workout will be deleted. Only after
@@ -184,7 +185,7 @@ stay immutable and retain their original kind. Add `cancelled` to the
 `session_sets.status` check and update the row/cross-table guards: completed
 sets still require kind-specific actuals and timestamps; cancelled sets allow
 no actuals or completion/rest events. Add the deferred template completeness
-guard on the template and its children, subject to the zero-set decision; its
+guard on the template and its children, requiring at least one set per exercise; its
 check must cover insert, edit, and child removal. Design a narrow in-progress discard
 operation with child-delete permission and protect terminal sessions and sets.
 The existing one-active partial index remains. Preflight any existing
@@ -274,7 +275,7 @@ Approved ordered values: None; Arms; Back; Cardio; Chest; Core; Full Body; Legs;
 | name | VARCHAR(200) | Required; trimmed, nonblank; duplicates allowed. |
 | category_id | SMALLINT | Required FK exercise_categories. |
 | body_part_id | SMALLINT | Required FK body_parts. |
-| measurement_kind | VARCHAR(20) | **Planned new column**; required effective reps/duration/duration_distance kind. Backfill existing rows from category. Bodyweight may be reps or duration; other categories match their category kind. |
+| measurement_kind | VARCHAR(20) | Required effective reps/duration/duration_distance kind. Backfill existing rows from category. Bodyweight may be reps or duration; other categories match their category kind. |
 | source_type | VARCHAR(20) | Required; provider or custom. |
 | description | TEXT | Nullable. |
 | is_active | BOOLEAN | Required; default true; does not prohibit approved permanent deletion. |
@@ -355,7 +356,7 @@ Unique (template_id, position); repeated exercise IDs are allowed. Reordering ne
 | weight_unit | VARCHAR(2) | Nullable; kg/lb iff suggested_weight is supplied. |
 | rest_seconds | INTEGER | Required; default 120; nonnegative. |
 
-Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's effective `exercises.measurement_kind`, including when a live exercise/category changes. The old migration still checks the category kind. Targets may be absent only in an unsaved edit; Save and Start must reject a missing required target. Whether an exercise can have zero sets remains open.
+Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's effective `exercises.measurement_kind`, including when a live exercise/category changes. Revision 0003 checks the effective exercise kind. Targets may be absent only in an unsaved edit; Save and Start must reject a missing required target. Every saved template exercise must have at least one valid set.
 
 ### workout_sessions
 
@@ -422,7 +423,7 @@ Unique (session_id, position). At capture/insertion, validate a real accessible 
 | actual_distance_meters | NUMERIC(12,3) | Nullable until completion; positive meters; required for completed duration_distance kind only. |
 | actual_weight | NUMERIC(10,3) | Nullable; nonnegative; optional for every category. |
 | weight_unit | VARCHAR(2) | Nullable; kg/lb iff actual_weight is supplied. |
-| status | VARCHAR(20) | Required; pending, completed, skipped, or **planned new value** cancelled. Cancelled means unfinished when the user saves a partial workout. |
+| status | VARCHAR(20) | Required; pending, completed, skipped, or cancelled. Cancelled means unfinished when the user saves a partial workout. |
 | completed_at | TIMESTAMPTZ | Required iff completed; retained and immutable after completion. |
 | rest_seconds | INTEGER | Required; default 120; nonnegative. |
 | was_in_starting_plan | BOOLEAN | Required; true iff this execution row belongs to the immutable initial plan. |
@@ -756,16 +757,14 @@ keeping them outside the physical foundation rather than inventing behavior:
 5. Timer adjustment, skip, undo, pause/resume.
 6. Account linking/application-session storage, onboarding unit default,
    sample administration, account erasure.
-7. Whether every template exercise must include at least one set; the owner
-   requires at least one exercise and complete targets at Save, and Start must
-   refuse an incomplete template. In-workout exercise removal/reordering beyond
-   the specific unperformed-set operation remains undecided.
+7. In-workout exercise removal/reordering beyond the specific unperformed-set
+   operation remains undecided. The owner has resolved template completeness:
+   at least one exercise and at least one valid set per included exercise.
 8. Whether a Bodyweight exercise's effective kind can change after it appears
    in a live template, and whether Assisted Bodyweight also needs duration.
 
-No API implementing those behaviors is included in #3/#4. The newly approved
-changes require a new migration and planned API work; they are not present in
-the foundation implementation. Do not rewrite the initial migration or
+No API implementing those behaviors is included in #3/#4. Revision 0003 implements the approved database follow-up.
+Workout API implementation and the remaining product rules stay separate. Do not rewrite the initial migration or
 pretend this document settled the remaining product rules.
 
 PR #17 supplied the reviewed representation for canonical units, unused-field
@@ -780,7 +779,7 @@ The local implementation adds SQLAlchemy metadata, frozen Alembic schema/guard
 SQL, a separate versioned master-data migration, target confirmation tooling,
 and PostgreSQL integration tests. Diagrams/dictionary stay synchronized.
 Verification runs only on disposable PostgreSQL 17. The owner's development
-database is not migrated by this work. Publication remains the owner's action.
+database is not migrated by this work. Publication and application remain separately reviewed actions.
 
 Required future evidence includes fresh upgrade, all keys/indexes/guards,
 invalid rows and concurrent active-workout attempts, measurement boundaries,
@@ -798,6 +797,6 @@ Logs/metrics/traces use shared telemetry and the maintained observability
 design. Do not store telemetry in these tables or log weights, measurements,
 notes, tokens, raw snapshots, SQL parameters, or credentials.
 
-Review the local code and validation results before publishing. No role is
-invoked automatically, and no changes are committed or pushed by this task.
+Review the local code and validation results before publishing. No follow-on role is invoked automatically; merges, existing-target upgrades
+and deployments remain human-authorized actions.
 
