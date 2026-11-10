@@ -3,8 +3,9 @@
 Design status: **PROPOSED FOR REVIEW**. The owner requested an initial design;
 the contracts and recommendations here still need human approval.
 
-Implementation status: **Not started**. Database migrations exist, but there is
-no FastAPI application or implemented endpoint in this repository yet.
+Implementation status: **Partially implemented**. The FastAPI application,
+shared response and error behavior, and `GET /health/live` exist (issue #12).
+Readiness and lookup endpoints are not implemented yet.
 
 Related context: [system overview](../architecture/overview.md),
 [database design](../database/design.md), [ER diagram](../database/er-diagram.mmd),

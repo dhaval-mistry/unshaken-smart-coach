@@ -154,6 +154,12 @@ Errors use the shared envelope from the
 and `500` `internal_error`. Error messages never include submitted input,
 stack traces, or connection details.
 
+Paths are matched exactly. A trailing slash such as `/health/live/` returns the
+shared JSON `404 not_found` instead of redirecting. The OpenAPI document at
+`/docs` lists the liveness `200`, `422` and `500` responses with the shared
+error schema and headers; app-wide `404` and `405` behavior is described in
+the API description at the top of that page.
+
 ### HTTP contract tests
 
 These tests need no database or observability stack. From `backend/`:

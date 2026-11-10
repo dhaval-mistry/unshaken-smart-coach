@@ -1,4 +1,17 @@
-"""HTTP contract tests for liveness and the shared response behavior (issue #12)."""
+"""HTTP contract tests for liveness and the shared response behavior (issue #12).
+
+Protected contract: GET /health/live returns exactly 200 {"status": "alive"};
+every response is JSON with Cache-Control: no-store and a server-generated
+UUID in X-Request-ID; errors use the shared envelope with a matching request
+ID; and no response reveals submitted input, SQL, credentials, hosts,
+connection strings or stack traces.
+
+Most tests call the app in-process through TestClient, with telemetry startup
+replaced by no-op functions. They prove HTTP behavior, not a real socket,
+uvicorn, or telemetry delivery. Two tests run in a separate Python process
+because imports and OpenTelemetry's global providers can only be set up once
+per process.
+"""
 
 import os
 import subprocess
@@ -43,6 +56,7 @@ def assert_error(response, status_code: int, code: str) -> None:
 
 
 def test_live_returns_alive(client):
+    """The canonical path returns exactly the documented body and headers."""
     response = client.get("/health/live")
     assert response.status_code == 200
     assert response.json() == {"status": "alive"}
@@ -81,7 +95,40 @@ def test_wrong_method_keeps_allow_header(client):
     assert response.headers["allow"] == "GET"
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"params": {"foo": "private-query"}},
+        {"content": b"private-body"},
+    ],
+    ids=["no-input", "query", "body"],
+)
+def test_trailing_slash_returns_json_not_redirect(client, extra):
+    """Slash variants are unknown paths: JSON 404, not an empty 307 redirect.
+
+    Routing happens before the input check, so these are 404 rather than 422.
+    """
+    response = client.request(
+        "GET",
+        "/health/live/",
+        follow_redirects=False,
+        **extra,
+    )
+
+    # This helper already checks JSON, no-store, UUID format, and matching IDs.
+    assert_error(response, 404, "not_found")
+    assert "location" not in response.headers
+    assert "private" not in response.text
+
+
 def test_unexpected_failure_is_safe(client, monkeypatch):
+    """A controlled crash returns a safe 500.
+
+    Replacing LiveResponse makes the route raise an error whose text contains
+    fake secrets. This proves the handler hides exception text; it does not
+    prove every possible failure inside FastAPI or uvicorn is handled.
+    """
     def broken(**_):
         raise RuntimeError(
             "password=hunter2 SELECT * FROM users "
@@ -115,6 +162,40 @@ def test_openapi_documents_exact_liveness_response(client):
     assert model["properties"]["status"]["const"] == "alive"
 
 
+def test_openapi_documents_shared_response_contract(client):
+    """Clients can discover the error schema and the shared response headers.
+
+    These are documentation checks only; the runtime tests above prove the
+    actual responses.
+    """
+    schema = client.get("/openapi.json").json()
+    responses = schema["paths"]["/health/live"]["get"]["responses"]
+
+    for status in ("200", "422", "500"):
+        headers = responses[status]["headers"]
+        assert "X-Request-ID" in headers
+        assert "Cache-Control" in headers
+        assert headers["X-Request-ID"]["schema"]["format"] == "uuid"
+        assert headers["Cache-Control"]["schema"]["enum"] == ["no-store"]
+
+    for status in ("422", "500"):
+        error_schema = responses[status]["content"]["application/json"]["schema"]
+        assert error_schema["$ref"] == "#/components/schemas/ErrorResponse"
+
+    envelope = schema["components"]["schemas"]["ErrorResponse"]
+    assert envelope["required"] == ["error"]
+    assert envelope["properties"]["error"]["$ref"] == (
+        "#/components/schemas/ErrorDetail"
+    )
+    detail = schema["components"]["schemas"]["ErrorDetail"]
+    assert set(detail["required"]) == {"code", "message", "request_id"}
+
+    # App-wide routing errors are described once, in the API description.
+    description = schema["info"]["description"]
+    assert "not_found" in description
+    assert "method_not_allowed" in description
+
+
 def run_isolated(code: str, **env: str) -> subprocess.CompletedProcess:
     """Run code in a fresh Python process so imports and global telemetry are clean."""
     return subprocess.run(
@@ -127,6 +208,7 @@ def run_isolated(code: str, **env: str) -> subprocess.CompletedProcess:
 
 
 def test_import_and_liveness_do_not_load_database_code():
+    """Startup and liveness never import database code, even with a bad URL."""
     code = """
 import sys
 from fastapi.testclient import TestClient
@@ -143,6 +225,11 @@ assert not loaded, loaded
 
 
 def test_liveness_survives_unreachable_telemetry_exporter():
+    """Real telemetry pointed at a dead endpoint does not change the 200.
+
+    This shows liveness works with that configuration; it does not assert that
+    an export attempt actually happened.
+    """
     code = """
 from fastapi.testclient import TestClient
 from app.main import app
