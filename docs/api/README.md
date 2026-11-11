@@ -12,6 +12,17 @@ lookups, authenticated exercise/workout APIs and the #30 follow-up migration
 are not implemented on that baseline. Closed, unmerged PR #33 is not accepted
 implementation and is not the basis of this design-only revision.
 
+**GitHub review snapshot (2026-11-10):** the repository has 13 open issues,
+#13–#15 and #21–#30, and none has an issue comment. The owner-authored
+[PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+records the later decision that every saved template exercise needs at least
+one valid set on creation and update. That pull request was closed without
+merge, so its code and reported tests are not accepted implementation; its
+explicit owner-decision record is retained as product context. The descriptions
+of #23, #24, #25 and #30 still call the zero-set rule open and need a separate
+human-approved GitHub update. Until then, follow the later recorded decision
+without treating any proposed migration mechanism as approved.
+
 ## Canonical design homes
 
 | Document | Owns |
@@ -51,8 +62,10 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 
 - Each saved template has at least one exercise; **each included exercise has
   at least one valid set**, both on creation and later updates. The owner
-  explicitly resolved the zero-set question in this discussion. References to
-  it as still open in GitHub need a human-approved record update, not a new answer.
+  explicitly resolved the zero-set question in the owner-decision section of
+  [PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33).
+  References to it as still open in #23, #24, #25 and #30 need a human-approved
+  record update, not a new answer.
 - Required targets follow effective kind: positive reps, positive duration, or
   positive duration plus distance. Timed Bodyweight needs no dummy reps.
 - Weight stays optional; zero with kg/lb is explicit, not missing. New sets use

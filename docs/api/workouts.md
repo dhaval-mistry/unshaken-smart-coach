@@ -6,6 +6,14 @@ bounds and recommendations are proposals for review, not implementation
 authorization. Main `a4cafb8` has only the liveness API and earlier database
 foundation. Closed PR #33 did not deliver an accepted #30 migration.
 
+Decision provenance matters here: the owner-authored
+[PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+records the later approval that every saved template exercise has at least one
+valid set on creation and update. PR #33 was closed without merge, so none of
+its implementation or test claims are accepted baseline behavior. The stale
+zero-set wording in open issues #23, #24, #25 and #30 still needs a separate
+human-approved GitHub update.
+
 Use [shared HTTP/access/deadline rules](foundation.md), the
 [exercise contracts](exercises.md) and [database design](../database/design.md).
 All examples use synthetic UUIDs. Every route below requires verified

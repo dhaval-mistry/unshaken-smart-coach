@@ -16,6 +16,13 @@ Closed, unmerged PR #33 is not accepted implementation; none of its code is
 included here. New technical mechanisms below are proposals for owner review.
 This revision does not connect to or change any database.
 
+The owner-decision section of the
+[PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+is the recorded source for the later minimum-one-set approval. Retaining that
+human decision does not accept the closed pull request's code, migration, or
+reported validation. Open issues #23, #24, #25 and #30 still contain older
+zero-set wording and require a separate human-approved GitHub record update.
+
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
 and [master records #4](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/4).
@@ -47,9 +54,11 @@ Retain the previously confirmed requirements:
 - A Bodyweight exercise may use duration instead of reps. Do not require dummy
   reps for a timed Plank. Weight remains optional.
 - A template needs at least one exercise and all necessary exercise details
-  and targets before Save. The owner has now explicitly confirmed that **every
-  included exercise requires at least one valid set**, on initial creation and
-  subsequent updates. The former zero-set question is resolved, not inferred.
+  and targets before Save. The owner explicitly confirmed in the owner-decision
+  section of [PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+  that **every included exercise requires at least one valid set**, on initial
+  creation and subsequent updates. The former zero-set question is resolved,
+  not inferred; the closed PR's implementation remains unaccepted.
 - Cancelling an active workout offers a warning that Discard deletes even
   completed reps. Discard saves no workout. Save keeps completed work and marks
   unfinished exercises cancelled.

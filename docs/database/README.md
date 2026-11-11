@@ -29,8 +29,12 @@ the proposed successor after `0002_master_records`, compatibility/conflict
 handling and disposable-only rollback. Its
 [privileged discard boundary](design.md#privileged-discard-boundary-proposal)
 and live-template kind-edit restriction are proposals requiring review.
-Closed, unmerged PR #33 is not implemented/accepted main behavior. No new
-migration or SQL is included in this design revision.
+The owner-decision section of
+[PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33) records
+that minimum-set approval, but the closed, unmerged pull request is not
+implemented/accepted main behavior. Open issues #23, #24, #25 and #30 retain
+older zero-set wording that needs a separate human-approved GitHub update. No
+new migration or SQL is included in this design revision.
 
 The [API index](../api/README.md) maps all open API stories to contracts and
 their migration/auth/provider prerequisites. Dependent APIs use #30's future
