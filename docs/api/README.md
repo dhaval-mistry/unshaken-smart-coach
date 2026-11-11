@@ -5,23 +5,24 @@ decisions remain approved; new paths, payloads, permission boundaries and
 recommendations below are proposals until accepted. This document does not mark
 issues Ready, assign work or approve a migration.
 
-**Implemented baseline:** main `a4cafb8` has the FastAPI application, shared JSON
-errors/headers, `GET /health/live`, shared telemetry helpers, and database
-revisions `0001_database_foundation` and `0002_master_records`. Readiness,
-lookups, authenticated exercise/workout APIs and the #30 follow-up migration
-are not implemented on that baseline. Closed, unmerged PR #33 is not accepted
-implementation and is not the basis of this design-only revision.
+**Implemented baseline:** application code through `a4cafb8` has the FastAPI
+application, shared JSON errors/headers, `GET /health/live`, shared telemetry
+helpers, and database revisions `0001_database_foundation` and
+`0002_master_records`. Readiness, lookups, authenticated exercise/workout APIs
+and the #30 follow-up migration remain unimplemented. PR #34 merged this design
+package into main at `5a10833`; merging documentation did not implement those
+contracts. Closed, unmerged PR #33 is not accepted implementation.
 
-**GitHub review snapshot (2026-11-10):** the repository has 13 open issues,
-#13–#15 and #21–#30, and none has an issue comment. The owner-authored
+**GitHub review snapshot (2026-11-11):** the repository has 13 open issues,
+#13–#15 and #21–#30. Their descriptions are aligned with this merged design,
+including explicit unresolved D1–D9 gates. The owner-authored
 [PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
 records the later decision that every saved template exercise needs at least
 one valid set on creation and update. That pull request was closed without
 merge, so its code and reported tests are not accepted implementation; its
-explicit owner-decision record is retained as product context. The descriptions
-of #23, #24, #25 and #30 still call the zero-set rule open and need a separate
-human-approved GitHub update. Until then, follow the later recorded decision
-without treating any proposed migration mechanism as approved.
+explicit owner-decision record is retained as product context. Issues #23, #24,
+#25 and #30 now record that resolved product rule without treating any proposed
+migration mechanism as approved.
 
 ## Canonical design homes
 

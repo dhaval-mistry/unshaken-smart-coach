@@ -10,18 +10,20 @@ Implementation status: **The existing SQLAlchemy/Alembic foundation implements
 the earlier rules; the later approved changes need a new migration and API work**.
 It has not been applied to the owner's existing database. PostgreSQL
 17 setup was merged through [PR #16](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/16).
-This design-only revision starts from main `a4cafb8c76fc7e33939de9bc4072a64e46c5ebc5`.
-Main has revisions `0001_database_foundation` and `0002_master_records` only.
-Closed, unmerged PR #33 is not accepted implementation; none of its code is
-included here. New technical mechanisms below are proposals for owner review.
-This revision does not connect to or change any database.
+This design started from application baseline
+`a4cafb8c76fc7e33939de9bc4072a64e46c5ebc5` and was merged through PR #34 at
+`5a10833`. Main still has revisions `0001_database_foundation` and
+`0002_master_records` only; merging this document did not add migration 0003.
+Closed, unmerged PR #33 is not accepted implementation, and none of its code is
+included here. New technical mechanisms below remain proposals for owner
+review. This design does not connect to or change any database.
 
 The owner-decision section of the
 [PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
 is the recorded source for the later minimum-one-set approval. Retaining that
 human decision does not accept the closed pull request's code, migration, or
-reported validation. Open issues #23, #24, #25 and #30 still contain older
-zero-set wording and require a separate human-approved GitHub record update.
+reported validation. Open issues #23, #24, #25 and #30 now record the resolved
+minimum-one-set rule while preserving the unapproved technical gates.
 
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
