@@ -77,6 +77,9 @@ exercises = sa.Table(
     sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.true()),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+    # Added by 0003; keeping it last preserves the frozen 0001 physical order.
+    sa.Column("measurement_kind", sa.String(20), nullable=False),
+    sa.CheckConstraint("measurement_kind IN ('reps','duration','duration_distance')", name="ck_exercises_measurement_kind"),
     sa.CheckConstraint("source_type IN ('provider', 'custom')", name="ck_exercises_1"),
     sa.CheckConstraint("name = btrim(name) AND name <> ''", name="ck_exercises_2"),
 )
@@ -250,7 +253,8 @@ session_sets = sa.Table(
     sa.Column("rest_ended_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-    sa.CheckConstraint("status IN ('pending', 'completed', 'skipped')", name="ck_session_sets_1"),
+    sa.CheckConstraint("status IN ('pending','completed','skipped','cancelled')", name="ck_session_sets_1"),
+    sa.CheckConstraint("status <> 'cancelled' OR (actual_reps IS NULL AND actual_duration_seconds IS NULL AND actual_distance_meters IS NULL AND actual_weight IS NULL AND weight_unit IS NULL AND completed_at IS NULL AND rest_started_at IS NULL AND rest_ended_at IS NULL)", name="ck_session_sets_cancelled_empty"),
     sa.CheckConstraint("set_number > 0", name="ck_session_sets_2"),
     sa.CheckConstraint("target_reps_snapshot > 0", name="ck_session_sets_3"),
     sa.CheckConstraint("target_duration_seconds_snapshot > 0", name="ck_session_sets_4"),

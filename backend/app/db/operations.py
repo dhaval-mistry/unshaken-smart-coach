@@ -33,6 +33,39 @@ def complete_set(connection, set_id, user_id, **actuals):
     return dict(connection.execute(sa.text(statement),dict(actuals,id=set_id)).mappings().one())
 
 
+def save_cancelled_session(connection, session_id, user_id):
+    """Retain performed work and cancel the owner's pending rows atomically.
+
+    Authentication and transaction commit remain caller responsibilities. The
+    shared database lock orders cancellation against completion and discard.
+    """
+    connection.exec_driver_sql("SELECT pg_advisory_xact_lock(746231901)")
+    workout = connection.execute(sa.text(
+        "SELECT * FROM workout_sessions WHERE id=:id AND user_id=:user FOR UPDATE"
+    ), {"id": session_id, "user": user_id}).mappings().one_or_none()
+    if workout is None or workout["status"] != "in_progress":
+        raise ValueError("Only the owner's active workout can be cancelled.")
+    connection.execute(sa.text(
+        "UPDATE session_sets s SET status='cancelled' FROM session_exercises e "
+        "WHERE s.session_exercise_id=e.id AND e.session_id=:id AND s.status='pending'"
+    ), {"id": session_id})
+    return dict(connection.execute(sa.text(
+        "UPDATE workout_sessions SET status='cancelled',finished_at=clock_timestamp() "
+        "WHERE id=:id RETURNING *"
+    ), {"id": session_id}).mappings().one())
+
+
+def discard_active_session(connection, session_id, user_id, *, confirmed=False):
+    """Invoke the owner-only database primitive for a confirmed active discard.
+
+    A future authenticated service must supply ``user_id`` from verified
+    identity. The caller owns the surrounding transaction.
+    """
+    connection.execute(sa.text(
+        "SELECT public.usc_discard_active_session(:id,:user,:confirmed)"
+    ), {"id": session_id, "user": user_id, "confirmed": confirmed})
+
+
 @contextmanager
 def locked_template_update(connection, session_id, user_id):
     """Check source version before a later approved mapping operation changes the plan.
