@@ -1,10 +1,9 @@
 # Database foundation
 
 The reviewed design from [PR #17](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/17)
-is implemented locally for stories #3 and #4 using Python 3.12, uv,
+is implemented on main through PR #18 for stories #3 and #4 using Python 3.12, uv,
 SQLAlchemy Core, Psycopg 3, and Alembic. No changes have been applied to the
-owner's existing development database. Local changes are not committed or
-published by this task.
+owner's existing development database by this design-only task.
 
 - [Design and confirmed requirements](design.md)
 - [ER diagram](er-diagram.md) and [matching Mermaid source](er-diagram.mmd)
@@ -23,6 +22,24 @@ new migration and API work; they are **not yet implemented**. Weight remains
 optional. One workout per user may be in progress. Permanent source deletion
 keeps retained history. Completed and saved-partial history remains protected.
 
+The owner has resolved minimum-set completeness: every saved template exercise
+requires at least one valid set, on initial creation and later updates. The
+[migration contract](design.md#issue-30-migration-contract-for-review) describes
+the proposed successor after `0002_master_records`, compatibility/conflict
+handling and disposable-only rollback. Its
+[privileged discard boundary](design.md#privileged-discard-boundary-proposal)
+and live-template kind-edit restriction are proposals requiring review.
+The owner-decision section of
+[PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33) records
+that minimum-set approval, but the closed, unmerged pull request is not
+implemented/accepted main behavior. Open issues #23, #24, #25 and #30 retain
+older zero-set wording that needs a separate human-approved GitHub update. No
+new migration or SQL is included in this design revision.
+
+The [API index](../api/README.md) maps all open API stories to contracts and
+their migration/auth/provider prerequisites. Dependent APIs use #30's future
+schema; they do not each create another foundation migration.
+
 Validation uses fresh disposable PostgreSQL 17 databases and synthetic data.
 Checks cover schema/keys/indexes/seeds, measurement/ownership/source failures,
 atomic snapshot capture, deletion/history preservation, concurrent starts and
@@ -35,4 +52,3 @@ or application APIs are required.
 Applying migrations to an existing/local/shared target needs its owner's
 separate approval of the displayed nonsecret target, current revision and plan.
 Never reset a database or delete a volume as normal setup.
-

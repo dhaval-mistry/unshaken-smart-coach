@@ -23,6 +23,14 @@ saved partial workout. A confirmed Discard removes only an in-progress draft;
 terminal session history stays protected. Template Save requires at least one
 exercise and complete targets, a rule the ER diagram alone cannot express.
 
+The owner has additionally confirmed at least one valid set per included
+exercise on initial Save and later updates. The mandatory template-child
+cardinalities below show this **target design**, not the current 0001/0002
+database behavior. Effective exercise kind and cancelled sets remain planned;
+the target dictionary has 129 columns while current main has 128. Privileged
+discard execution and catalog-kind edits need the separately labelled proposals
+in [database design](design.md); an ER diagram does not approve those mechanisms.
+
 starting_plan_snapshot is physically nullable only during the creation
 transaction. A deferred constraint trigger requires validated non-NULL JSON
 at commit; PostgreSQL NOT NULL itself is not deferrable. The populated JSON
@@ -32,11 +40,11 @@ deletion, chronology or immutability guards; the design explains them.
 
 ```mermaid
 erDiagram
-    %% Reviewed PR17 foundation plus approved follow-up proposals; follow-up migration not written.
+    %% Target design: reviewed PR17 plus approved issue30 product rules; migration not implemented.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
-    %% exercises.measurement_kind and session_sets cancelled status are planned changes.
+    %% Effective kind/cancelled sets planned; saved templates need one exercise and one valid set per exercise.
     %% Confirmed Discard removes only an owned in-progress draft; terminal history remains protected.
     direction TB
     users ||--o{ user_identities : authenticates_with
@@ -47,9 +55,9 @@ erDiagram
     body_parts ||--o{ exercises : classifies
     exercises ||--o| provider_exercises : provider_details
     exercises ||--o| custom_exercises : custom_details
-    workout_templates ||--o{ template_exercises : contains_live_plan
+    workout_templates ||--|{ template_exercises : contains_live_plan
     exercises ||--o{ template_exercises : requires_live_reference
-    template_exercises ||--o{ template_sets : plans
+    template_exercises ||--|{ template_sets : plans
     workout_templates o|--o{ workout_sessions : live_source
     workout_templates o|--o{ workout_sessions : live_applied_target
     workout_templates o|--o{ workout_templates : live_copy_source
@@ -214,4 +222,3 @@ erDiagram
         timestamptz updated_at
     }
 ```
-

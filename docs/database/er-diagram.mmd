@@ -1,9 +1,9 @@
 erDiagram
-    %% Reviewed PR17 foundation plus approved follow-up proposals; follow-up migration not written.
+    %% Target design: reviewed PR17 plus approved issue30 product rules; migration not implemented.
     %% Live FKs may detach after source deletion; original UUID snapshots are not FKs.
     %% starting_plan_snapshot is physically nullable during capture, committed non-NULL by deferred guard.
     %% One in-progress workout/user is enforced by a unique partial index.
-    %% exercises.measurement_kind and session_sets cancelled status are planned changes.
+    %% Effective kind/cancelled sets planned; saved templates need one exercise and one valid set per exercise.
     %% Confirmed Discard removes only an owned in-progress draft; terminal history remains protected.
     direction TB
     users ||--o{ user_identities : authenticates_with
@@ -14,9 +14,9 @@ erDiagram
     body_parts ||--o{ exercises : classifies
     exercises ||--o| provider_exercises : provider_details
     exercises ||--o| custom_exercises : custom_details
-    workout_templates ||--o{ template_exercises : contains_live_plan
+    workout_templates ||--|{ template_exercises : contains_live_plan
     exercises ||--o{ template_exercises : requires_live_reference
-    template_exercises ||--o{ template_sets : plans
+    template_exercises ||--|{ template_sets : plans
     workout_templates o|--o{ workout_sessions : live_source
     workout_templates o|--o{ workout_sessions : live_applied_target
     workout_templates o|--o{ workout_templates : live_copy_source
@@ -180,4 +180,3 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
-

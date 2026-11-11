@@ -10,8 +10,18 @@ Implementation status: **The existing SQLAlchemy/Alembic foundation implements
 the earlier rules; the later approved changes need a new migration and API work**.
 It has not been applied to the owner's existing database. PostgreSQL
 17 setup was merged through [PR #16](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/16).
-This revision starts from main `9b38ce9cdcad468a8a2cac302125c4c346523adc`.
-It does not connect to or change any database.
+This design-only revision starts from main `a4cafb8c76fc7e33939de9bc4072a64e46c5ebc5`.
+Main has revisions `0001_database_foundation` and `0002_master_records` only.
+Closed, unmerged PR #33 is not accepted implementation; none of its code is
+included here. New technical mechanisms below are proposals for owner review.
+This revision does not connect to or change any database.
+
+The owner-decision section of the
+[PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+is the recorded source for the later minimum-one-set approval. Retaining that
+human decision does not accept the closed pull request's code, migration, or
+reported validation. Open issues #23, #24, #25 and #30 still contain older
+zero-set wording and require a separate human-approved GitHub record update.
 
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
@@ -44,7 +54,11 @@ Retain the previously confirmed requirements:
 - A Bodyweight exercise may use duration instead of reps. Do not require dummy
   reps for a timed Plank. Weight remains optional.
 - A template needs at least one exercise and all necessary exercise details
-  and targets before Save.
+  and targets before Save. The owner explicitly confirmed in the owner-decision
+  section of [PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
+  that **every included exercise requires at least one valid set**, on initial
+  creation and subsequent updates. The former zero-set question is resolved,
+  not inferred; the closed PR's implementation remains unaccepted.
 - Cancelling an active workout offers a warning that Discard deletes even
   completed reps. Discard saves no workout. Save keeps completed work and marks
   unfinished exercises cancelled.
@@ -145,9 +159,11 @@ committed template, including edits/deletion of its last exercise or required
 target. A partial transaction cannot leave a published incomplete template.
 If stored drafts are later wanted, they need an explicit draft/published state
 and guards that prevent an incomplete draft being started. The owner has not
-selected a stored-draft feature. Whether every exercise must contain at least
-one set is still an explicit question below; do not claim a zero-set exercise
-is an approved complete template.
+selected a stored-draft feature. Every included exercise requires at least one
+set with all kind-required targets, both on initial Save and later updates.
+Deleting its last set without removing/replacing that exercise must fail at
+commit. These client/service flows are proposed future behavior, not existing
+API or frontend implementation; the new database guard is also not on main yet.
 
 **Cancel then Discard.** The client first warns that completed reps, durations,
 weights, and rest records in this active workout will be deleted. Only after
@@ -184,7 +200,7 @@ stay immutable and retain their original kind. Add `cancelled` to the
 `session_sets.status` check and update the row/cross-table guards: completed
 sets still require kind-specific actuals and timestamps; cancelled sets allow
 no actuals or completion/rest events. Add the deferred template completeness
-guard on the template and its children, subject to the zero-set decision; its
+guard on the template and its children, requiring at least one valid set per exercise; its
 check must cover insert, edit, and child removal. Design a narrow in-progress discard
 operation with child-delete permission and protect terminal sessions and sets.
 The existing one-active partial index remains. Preflight any existing
@@ -205,6 +221,123 @@ starting plan, marks pending sets cancelled, sets the terminal time, and
 releases the active slot. Delete attempts against completed or saved-partial
 history fail. Existing exercises, snapshots, template data, and seeds survive
 the migration without a category or historical measurement change.
+
+### Issue 30 migration contract for review
+
+The approved outcomes above belong to
+[#30](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/30), the sole
+schema/guard migration owner for this follow-up. Technical sequencing below is
+**proposed**, not executed or independently tested by this design task. Build a
+new successor after `0002_master_records`; do not replace, renumber or edit
+already-applied 0001/0002 files. No new application table is required by the
+approved scope. The logical target remains 13 application tables, adding one
+effective-kind column (129 physical columns once implemented). The dictionary
+marks that new field as planned until implementation is accepted.
+
+1. Acquire migration serialization and a bounded maintenance lock on the
+   affected foundation data before preflight. Quiesce application writes during
+   the approved upgrade window; a migration advisory lock alone does not stop
+   a direct writer that already holds a conflicting table lock. Set bounded
+   lock waits and fail/rollback rather than hanging or retrying without limit.
+2. Preflight existing template parents/children/targets and legacy cancelled
+   sessions. Reject empty templates, zero-set exercises, missing/incompatible
+   targets, cancelled parents with pending rows, and category values that cannot
+   safely backfill the approved kind. Report a safe conflict category/count;
+   inspect details privately. Do not invent reps/seconds, delete rows, change
+   seeds or rewrite history to make the upgrade pass. A separately approved
+   data correction and retry is a different action.
+3. Add the new exercise field, backfill from current category kind, then require
+   it and validate compatibility. Preserve existing timestamps as well as IDs,
+   names, category seeds, targets, actuals and historical snapshots byte-for-byte
+   except for the new field. Any temporarily suspended timestamp behavior must
+   be restored under the same locked transaction before final validation.
+4. Change live template validation/capture to the effective exercise kind;
+   retain captured historical kinds and JSON forever. Add cancelled-set empty
+   actual/unit/event rules, parent/child transition consistency, and the deferred
+   complete-template guard. A session status of cancelled already exists in the
+   baseline; strengthen its partial-save semantics rather than inventing a new
+   parent table/status system. Apply compatible guards on all affected parent
+   edits, child inserts/edits/deletes and exercise classification changes.
+5. Install only the approved narrow discard capability described below, with
+   its EXECUTE permissions restricted in the same transaction. Keep ordinary
+   completed/terminal-history mutation/delete and TRUNCATE protections. Validate
+   the entire resulting state before recording the revision and committing DDL.
+
+The whole upgrade is transactional: failure preserves earlier revision, schema,
+data and trigger/permission state. No migration runs on import, startup or an API
+request. Preview/target approval remains mandatory for every existing target.
+Applying this design or a future tested migration to an existing/shared database
+is not authorized by design approval or a merged PR.
+
+Rollback remains an explicitly authorized disposable-database activity. Preflight
+whether effective kinds/cancelled-set history can be represented by the earlier
+schema; refuse incompatible data without rewriting it. Restore the exact prior
+guard definitions and only revision-owned functions/constraints. Never drop all
+functions matching a prefix, silently coerce timed Bodyweight into reps, erase
+cancelled history, or use cascade cleanup against unrelated objects.
+
+Required future tests include fresh empty upgrade; populated reps/Bodyweight/
+Cardio/Duration upgrade; exact old-value/timestamp/seed/snapshot preservation;
+repeat upgrade; invalid legacy data with full rollback; all kind/target/zero-set
+cases; direct-writer guard bypass attempts; concurrent Start/Complete/Save/
+Discard/Finish interleavings; ordinary/TRUNCATE history protection; compatible
+rollback/re-upgrade and incompatible rollback refusal. Use synthetic data and
+disposable PostgreSQL 17 only. Prior reported tests from an unmerged branch do
+not establish acceptance of this new design or a later implementation.
+
+### Privileged discard boundary proposal
+
+**Technical proposal D1, requiring owner review:** use one narrowly scoped
+database operation for confirmed active-draft discard. A future trusted backend
+derives owner identity from verified sign-in and passes it to this operation;
+the owner UUID argument is not itself authentication. Clients and ordinary
+database writers must not receive this capability.
+
+If implemented with `SECURITY DEFINER`, create and revoke default PUBLIC EXECUTE
+within the same migration transaction. Initially only its migration owner may
+invoke it; grant EXECUTE later only to an explicitly approved trusted backend
+role. Do not grant it to every role with table read/write access. No role name,
+new application-auth table, or complete database role hierarchy is selected by
+this proposal. A dedicated least-privilege function owner can be reviewed with
+the deployment role design; a privileged database administrator is outside the
+ordinary-writer guarantee.
+
+Set a fixed search path of `pg_catalog`, a trusted application schema, then
+`pg_temp` last, and schema-qualify application objects/dependent helper calls.
+The trusted schema must not permit untrusted object creation. Callers cannot
+choose the schema, relation, SQL text or function owner. Review function and
+trigger dependencies together: unqualified helpers in a privileged call path
+must not resolve through attacker-writable schemas.
+
+Recheck explicit confirmation, verified owner equality and `in_progress` status
+while holding the operation lock and parent row lock. Delete only children of
+that exact parent, then the parent, atomically. A transaction-local parent gate
+may coordinate guards only when combined with the trusted privileged execution
+identity; a caller-set GUC, `SET ROLE`, supplied owner UUID or arbitrary Boolean
+must not independently enable history deletion. Clear/restore any gate on both
+normal and exceptional exits. Repeated/failed calls must not target a different
+workout or leave a capability enabled on a pooled connection.
+
+Verify an ordinary role with table privileges cannot call the function even
+with correct target/owner UUIDs, cannot spoof a gate and cannot delete completed
+or terminal history. Verify the trusted invoker's wrong owner/confirmation/
+terminal-target paths reject without changes, and authorized active discard
+rolls back completely on failure. This is a database capability boundary, not
+an authentication implementation or permission to delete retained history.
+
+Reference: [PostgreSQL 17 SECURITY DEFINER safety and default EXECUTE privileges](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY).
+
+### Effective-kind edit policy proposal
+
+**D2 remains unapproved:** while a saved live template references an exercise,
+recommend rejecting a change between reps/duration until its references are
+explicitly removed/replaced. This conservative temporary restriction must be
+recorded as an owner-approved policy before a guard codifies it. An alternative
+is an authorized atomic conversion of all affected live targets; that requires
+a separate edit/version/concurrency design. Validating new targets at commit
+does not itself authorize the product edit. Neither option may rewrite earlier
+session kinds, starting snapshots or completed actuals. Assisted Bodyweight
+duration and edits of a used exercise remain separate scope decisions.
 
 ## Table dictionary
 
@@ -355,7 +488,7 @@ Unique (template_id, position); repeated exercise IDs are allowed. Reordering ne
 | weight_unit | VARCHAR(2) | Nullable; kg/lb iff suggested_weight is supplied. |
 | rest_seconds | INTEGER | Required; default 120; nonnegative. |
 
-Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's effective `exercises.measurement_kind`, including when a live exercise/category changes. The old migration still checks the category kind. Targets may be absent only in an unsaved edit; Save and Start must reject a missing required target. Whether an exercise can have zero sets remains open.
+Unique (template_exercise_id, set_number). Validate fields against the referenced exercise's effective `exercises.measurement_kind`, including when a live exercise/category changes. The old migration still checks the category kind. Targets may be absent only in an unsaved edit; Save and Start must reject a missing required target. Every saved template exercise must have at least one valid set; creation, updates and child removal must preserve that invariant at commit.
 
 ### workout_sessions
 
@@ -756,12 +889,17 @@ keeping them outside the physical foundation rather than inventing behavior:
 5. Timer adjustment, skip, undo, pause/resume.
 6. Account linking/application-session storage, onboarding unit default,
    sample administration, account erasure.
-7. Whether every template exercise must include at least one set; the owner
-   requires at least one exercise and complete targets at Save, and Start must
-   refuse an incomplete template. In-workout exercise removal/reordering beyond
-   the specific unperformed-set operation remains undecided.
+7. In-workout exercise removal/reordering beyond the specific unperformed-set
+   operation remains undecided. The owner has resolved saved-template completeness:
+   at least one exercise and at least one valid set per included exercise;
+   Start must refuse an incomplete template.
 8. Whether a Bodyweight exercise's effective kind can change after it appears
    in a live template, and whether Assisted Bodyweight also needs duration.
+
+The [API owner-decision table](../api/workouts.md#owner-decisions-and-approval-checklist)
+collects remaining cross-story choices and explicitly labelled recommendations.
+The #30 privileged-discard capability and conservative live-kind edit policy
+above are new technical proposals for review, not implied owner approvals.
 
 No API implementing those behaviors is included in #3/#4. The newly approved
 changes require a new migration and planned API work; they are not present in
@@ -800,4 +938,3 @@ notes, tokens, raw snapshots, SQL parameters, or credentials.
 
 Review the local code and validation results before publishing. No role is
 invoked automatically, and no changes are committed or pushed by this task.
-
