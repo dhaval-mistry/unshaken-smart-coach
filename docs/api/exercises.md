@@ -165,13 +165,16 @@ Possible errors under the shared safe envelope:
 
 ## Catalog edits and historical meaning
 
-Changing an existing exercise kind is outside #22. Proposed temporary policy
-(D2): reject a kind change while a live saved template references that exercise;
-require explicit removal/replacement first. This policy is **not approved**.
-An alternative is an authorized atomic conversion of all affected live targets;
-it needs its own edit/concurrency contract. Neither choice may rewrite captured
-session kinds or completed performance. Assisted Bodyweight duration is not
-implicitly added by the Bodyweight exception.
+Changing an existing exercise kind is outside #22. The owner approved D2 in the
+Solution Architect follow-up on 2026-11-11: reject a kind change while any saved
+live template references that exercise. Every live reference must first be
+explicitly removed or replaced through a complete valid template update;
+creating a new exercise is preferred. Never convert live targets or rewrite
+captured session kinds or completed performance. A compatible change to an
+unreferenced exercise still needs a separately authorized edit/admin workflow.
+Atomic conversion of referenced templates would require a separate future
+product/design approval. Assisted Bodyweight duration is not implicitly added
+by the Bodyweight exception.
 
 ## Verification required
 
@@ -185,4 +188,4 @@ safe telemetry, attribution/retention handling and OpenAPI together.
 
 These are future acceptance checks, not results executed by this design task.
 The [owner decision table](workouts.md#owner-decisions-and-approval-checklist)
-tracks D2/D7 and identity dependencies without treating them as approved.
+records approved D2 and tracks unapproved D7 and identity dependencies.
