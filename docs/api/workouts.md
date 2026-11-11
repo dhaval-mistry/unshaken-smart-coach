@@ -3,16 +3,18 @@
 **Status: proposed technical contracts; not implemented.** The owner's product
 rules below remain approved. Paths, JSON names, safe error codes, response
 bounds and recommendations are proposals for review, not implementation
-authorization. Main `a4cafb8` has only the liveness API and earlier database
-foundation. Closed PR #33 did not deliver an accepted #30 migration.
+authorization. PR #34 merged this design into main at `5a10833`, but current
+application behavior still has only the liveness API and database revisions
+`0001_database_foundation`/`0002_master_records`. Closed PR #33 did not deliver
+an accepted #30 migration.
 
 Decision provenance matters here: the owner-authored
 [PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
 records the later approval that every saved template exercise has at least one
 valid set on creation and update. PR #33 was closed without merge, so none of
-its implementation or test claims are accepted baseline behavior. The stale
-zero-set wording in open issues #23, #24, #25 and #30 still needs a separate
-human-approved GitHub update.
+its implementation or test claims are accepted baseline behavior. Open issues
+#23, #24, #25 and #30 now record the approved minimum-set rule; D1–D9 remain
+explicit owner gates where applicable.
 
 Use [shared HTTP/access/deadline rules](foundation.md), the
 [exercise contracts](exercises.md) and [database design](../database/design.md).
