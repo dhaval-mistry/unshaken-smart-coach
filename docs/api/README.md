@@ -1,9 +1,11 @@
 # API design and review map
 
-**Review status: proposed architecture for owner review.** Confirmed product
-decisions remain approved; new paths, payloads, permission boundaries and
-recommendations below are proposals until accepted. This document does not mark
-issues Ready, assign work or approve a migration.
+**Review status: mixed.** Confirmed product decisions and the issue #30 D1/D2
+constraints are approved; new API paths, payloads and later-story decisions
+remain proposals until accepted. The owner explicitly approved D1/D2 in the
+Solution Architect follow-up on 2026-11-11, closing #30's remaining architecture
+gates. Issue #30 can be marked Ready for a separately requested Developer. This
+document does not assign work, implement a migration or authorize applying one.
 
 **Implemented baseline:** application code through `a4cafb8` has the FastAPI
 application, shared JSON errors/headers, `GET /health/live`, shared telemetry
@@ -15,7 +17,7 @@ contracts. Closed, unmerged PR #33 is not accepted implementation.
 
 **GitHub review snapshot (2026-11-11):** the repository has 13 open issues,
 #13–#15 and #21–#30. Their descriptions are aligned with this merged design,
-including explicit unresolved D1–D9 gates. The owner-authored
+with D1/D2 now approved and D3–D9 retained as later-story gates. The owner-authored
 [PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
 records the later decision that every saved template exercise needs at least
 one valid set on creation and update. That pull request was closed without
@@ -65,8 +67,8 @@ issue status. All acceptance criteria must be verified in the implementation PR.
   at least one valid set**, both on creation and later updates. The owner
   explicitly resolved the zero-set question in the owner-decision section of
   [PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33).
-  References to it as still open in #23, #24, #25 and #30 need a human-approved
-  record update, not a new answer.
+  Issues #23, #24, #25 and #30 now record that approved rule; do not reopen it
+  during implementation.
 - Required targets follow effective kind: positive reps, positive duration, or
   positive duration plus distance. Timed Bodyweight needs no dummy reps.
 - Weight stays optional; zero with kg/lb is explicit, not missing. New sets use
@@ -79,16 +81,23 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 - Confirmed active-draft Discard removes even completed draft work; Cancel → Save
   retains completed work and cancels pending sets. No automatic template update
   is added to partial Save.
+- D1: Discard uses one narrowly scoped trusted database capability. PUBLIC and
+  ordinary writers cannot invoke or spoof it; it deletes only an explicitly
+  confirmed, owner-matched `in_progress` draft and never retained history.
+- D2: changing an exercise's effective kind is rejected while any saved live
+  template references it. References must first be explicitly removed/replaced;
+  no targets or historical workout measurements are converted or rewritten.
 
 ## Approval and implementation order
 
-Review the bounded technical proposals and open decisions in the
+Review the approved #30 constraints and remaining later-story decisions in the
 [owner decision table](workouts.md#owner-decisions-and-approval-checklist).
-Approval of this document's structure does not silently answer an open product
-question. Record an explicit choice before the affected behavior is implemented.
+D1/D2 approval makes #30 ready for separate implementation; it does not answer
+D3–D9 or authorize their affected API behavior.
 
 Public #13 → #14 → #15 can proceed independently of #30 and private sign-in.
-After design approval, #30 precedes effective-kind/template/cancellation APIs.
+Issue #30 now has approved architecture and precedes effective-kind/template/
+cancellation APIs; implementation still requires a separately requested role.
 Verified identity is a prerequisite for every private route; its session/account
 design and implementation require an approved authentication story. With that
 prerequisite, exercise choice/#22 and #23 lead to #24 → #25 → #26/#27 → #28 → #29.

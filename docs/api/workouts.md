@@ -13,8 +13,9 @@ Decision provenance matters here: the owner-authored
 records the later approval that every saved template exercise has at least one
 valid set on creation and update. PR #33 was closed without merge, so none of
 its implementation or test claims are accepted baseline behavior. Open issues
-#23, #24, #25 and #30 now record the approved minimum-set rule; D1–D9 remain
-explicit owner gates where applicable.
+#23, #24, #25 and #30 now record the approved minimum-set rule. The owner also
+approved D1/D2 in the Solution Architect follow-up on 2026-11-11; D3–D9 remain
+explicit later-story gates where applicable.
 
 Use [shared HTTP/access/deadline rules](foundation.md), the
 [exercise contracts](exercises.md) and [database design](../database/design.md).
@@ -289,7 +290,7 @@ confirmation while locked, then deletes sets, exercises and parent atomically.
 It releases the active slot, never deletes terminal/saved-partial history, and
 a later transaction failure restores all draft rows.
 
-Follow the [database privileged-discard proposal](../database/design.md#privileged-discard-boundary-proposal).
+Follow the [approved database privileged-discard boundary](../database/design.md#approved-privileged-discard-boundary).
 A supplied owner UUID or caller-set flag does not prove permission. Keep the
 privileged function unavailable to PUBLIC/ordinary writers; grant only to the
 approved trusted backend invoker. API auth derives the owner independently.
@@ -383,13 +384,22 @@ delivery. These checks are requirements, not tests run by this design revision.
 ## Owner decisions and approval checklist
 
 Approved minimum-one-set, measurement/weight rules, one-active/history rules and
-high-level Finish/Cancel choices are retained; do not ask for them again.
-The following decisions are **not approved** merely by appearing as recommendations.
+high-level Finish/Cancel choices are retained; do not ask for them again. The
+owner explicitly approved D1/D2 in the Solution Architect follow-up on
+2026-11-11. Those approvals close issue #30's architecture gates, so #30 can be
+marked Ready for a separately requested Developer; they do not implement or
+authorize applying a migration.
+
+| Approved ID | Recorded constraint |
+|---|---|
+| D1 / #30 discard | Install at most one narrowly scoped database operation for an explicitly confirmed, owner-matched `in_progress` draft. If it uses `SECURITY DEFINER`, fix the safe search path, schema-qualify dependencies, revoke PUBLIC in the migration transaction and keep execution with the migration/function owner until a separately approved least-privilege backend role exists. Caller IDs, Booleans, GUCs and `SET ROLE` never authenticate or bypass history protection. Foreign, unknown, unconfirmed and terminal targets remain unchanged; retained history is never deletable through this capability. |
+| D2 / #30, future catalog edit | Reject an effective-kind change while any saved live template references the exercise. Every live reference must first be explicitly removed or replaced through a complete valid template update; creating a new exercise is preferred. Never convert targets/units or rewrite captured sessions/history. A compatible change to an unreferenced exercise requires a separately authorized edit/admin workflow. This adds no edit API, provider remapping or Assisted Bodyweight rule. |
+
+The following D3–D9 decisions remain **unapproved** merely by appearing as
+recommendations and do not block the bounded #30 migration when kept outside it.
 
 | ID / affected work | Required decision | Recommendation for review / alternative |
 |---|---|---|
-| D1 / #30 discard | Approve the privileged execution boundary | Restrict to migration owner until an explicitly granted trusted backend role exists; revoke PUBLIC in the same transaction. Alternative implementation must provide equivalent narrow capability and no caller-flag bypass. |
-| D2 / #30, future catalog edit | Kind change while a live template references the exercise? | Temporarily prohibit it and require remove/replace references. Alternative: authorized atomic conversion of all live targets in a separately designed edit flow. Historical kinds never change. |
 | D3 / #26 | Actual performance versus edited planned targets on Yes; skipped/removed/added sets, optional weights/units and retry/expiry | Review a complete explicit proposed candidate before updating; reject stale source, do not invent missing weights, and retain completed history. Owner selects the actual field mapping. |
 | D4 / #27, future partial update | Accept Save with no completed sets? Offer template update after partial Save? | Offer Discard only for zero-completion cases; keep partial-template update out of the first scope. Alternatives require explicit owner choice. The schema may represent zero-completion partial history. |
 | D5 / #27 | JSON acknowledgement and repeat Discard response | JSON 200 acknowledgement; later absent row uses safe 404, no tombstone schema. Alternative durable idempotent replay requires reviewed storage/expiry. |
@@ -398,6 +408,6 @@ The following decisions are **not approved** merely by appearing as recommendati
 | D8 / all private APIs | Approved Google/Microsoft identity/session/account-linking contract and story | Establish a separate auth prerequisite; no automatic email linking or caller-ID fallback. Choose bearer/session storage before private implementation. |
 | D9 / #26 | Normal Finish with pending sets | Reject unfinished sets; explicit completion/cancellation or a separately approved skip action is required. Alternative must preserve truthful history. |
 
-Owner review can approve independent sections while leaving gated behaviors
-unapproved. A separately requested Developer follows only the approved slice;
-Code Reviewer/Tester roles and migrations are not invoked automatically.
+Owner review can approve D3–D9 independently while leaving other later-story
+behavior gated. A separately requested Developer may implement only approved
+#30 scope; Code Reviewer/Tester roles and migrations are not invoked automatically.

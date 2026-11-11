@@ -15,15 +15,18 @@ This design started from application baseline
 `5a10833`. Main still has revisions `0001_database_foundation` and
 `0002_master_records` only; merging this document did not add migration 0003.
 Closed, unmerged PR #33 is not accepted implementation, and none of its code is
-included here. New technical mechanisms below remain proposals for owner
-review. This design does not connect to or change any database.
+included here. The owner explicitly approved the D1 privileged-discard boundary
+and D2 live-kind edit policy in the Solution Architect follow-up on 2026-11-11.
+Later API decisions remain proposals. This design does not connect to or change
+any database.
 
 The owner-decision section of the
 [PR #33 description](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33)
 is the recorded source for the later minimum-one-set approval. Retaining that
 human decision does not accept the closed pull request's code, migration, or
 reported validation. Open issues #23, #24, #25 and #30 now record the resolved
-minimum-one-set rule while preserving the unapproved technical gates.
+minimum-one-set rule. D1/D2 are now approved #30 constraints; D3–D9 remain
+separate later-story gates.
 
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
@@ -287,13 +290,13 @@ rollback/re-upgrade and incompatible rollback refusal. Use synthetic data and
 disposable PostgreSQL 17 only. Prior reported tests from an unmerged branch do
 not establish acceptance of this new design or a later implementation.
 
-### Privileged discard boundary proposal
+### Approved privileged discard boundary
 
-**Technical proposal D1, requiring owner review:** use one narrowly scoped
-database operation for confirmed active-draft discard. A future trusted backend
-derives owner identity from verified sign-in and passes it to this operation;
-the owner UUID argument is not itself authentication. Clients and ordinary
-database writers must not receive this capability.
+**Approved D1 (owner follow-up, 2026-11-11):** issue #30 may install one
+narrowly scoped database operation for confirmed active-draft discard. A future
+trusted backend derives owner identity from verified sign-in and passes it to
+this operation; the owner UUID argument is not itself authentication. Clients
+and ordinary database writers must not receive this capability.
 
 If implemented with `SECURITY DEFINER`, create and revoke default PUBLIC EXECUTE
 within the same migration transaction. Initially only its migration owner may
@@ -329,17 +332,22 @@ an authentication implementation or permission to delete retained history.
 
 Reference: [PostgreSQL 17 SECURITY DEFINER safety and default EXECUTE privileges](https://www.postgresql.org/docs/17/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY).
 
-### Effective-kind edit policy proposal
+### Approved effective-kind edit policy
 
-**D2 remains unapproved:** while a saved live template references an exercise,
-recommend rejecting a change between reps/duration until its references are
-explicitly removed/replaced. This conservative temporary restriction must be
-recorded as an owner-approved policy before a guard codifies it. An alternative
-is an authorized atomic conversion of all affected live targets; that requires
-a separate edit/version/concurrency design. Validating new targets at commit
-does not itself authorize the product edit. Neither option may rewrite earlier
-session kinds, starting snapshots or completed actuals. Assisted Bodyweight
-duration and edits of a used exercise remain separate scope decisions.
+**Approved D2 (owner follow-up, 2026-11-11):** reject an effective-kind change
+while any saved live template references the exercise. Before changing the
+kind, every live reference must be explicitly removed or replaced through a
+complete, valid template update; creating a new exercise is preferred. Do not
+automatically convert template targets, units or measurements, and never rewrite
+captured session kinds, starting snapshots or completed performance.
+
+A compatible change to an unreferenced exercise may be supported only through
+a separately authorized edit or administration workflow. The #30 database
+guard must cover direct writers and serialize against concurrent creation of a
+new template reference so no incompatible state can commit. This approval does
+not add an edit API, authorize provider remapping, or decide Assisted Bodyweight
+duration. An atomic conversion of referenced templates would require a separate
+future product/design approval; it is not an alternative within #30.
 
 ## Table dictionary
 
@@ -895,13 +903,17 @@ keeping them outside the physical foundation rather than inventing behavior:
    operation remains undecided. The owner has resolved saved-template completeness:
    at least one exercise and at least one valid set per included exercise;
    Start must refuse an incomplete template.
-8. Whether a Bodyweight exercise's effective kind can change after it appears
-   in a live template, and whether Assisted Bodyweight also needs duration.
+8. Edit/admin behavior for compatible kind changes on unreferenced exercises,
+   provider remapping, and whether Assisted Bodyweight also needs duration. D2
+   already prohibits changing kind while any saved live template references
+   the exercise; that approved rule is not reopened here.
 
 The [API owner-decision table](../api/workouts.md#owner-decisions-and-approval-checklist)
 collects remaining cross-story choices and explicitly labelled recommendations.
 The #30 privileged-discard capability and conservative live-kind edit policy
-above are new technical proposals for review, not implied owner approvals.
+above are approved constraints. They close #30's architecture gates, so #30 can
+be marked Ready for a separately requested Developer. D3–D9 remain later-story
+gates and are not silently approved by #30 readiness.
 
 No API implementing those behaviors is included in #3/#4. The newly approved
 changes require a new migration and planned API work; they are not present in

@@ -27,8 +27,11 @@ requires at least one valid set, on initial creation and later updates. The
 [migration contract](design.md#issue-30-migration-contract-for-review) describes
 the proposed successor after `0002_master_records`, compatibility/conflict
 handling and disposable-only rollback. Its
-[privileged discard boundary](design.md#privileged-discard-boundary-proposal)
-and live-template kind-edit restriction are proposals requiring review.
+[privileged discard boundary](design.md#approved-privileged-discard-boundary)
+and live-template kind-edit restriction were explicitly approved by the owner
+in the Solution Architect follow-up on 2026-11-11. Those decisions close #30's
+architecture gates, so the issue can be marked Ready for a separately requested
+Developer; they do not implement or authorize applying the migration.
 The owner-decision section of
 [PR #33](https://github.com/dhaval-mistry/unshaken-smart-coach/pull/33) records
 that minimum-set approval, but the closed, unmerged pull request is not
