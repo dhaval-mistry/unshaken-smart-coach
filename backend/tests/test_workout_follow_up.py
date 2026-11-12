@@ -56,6 +56,106 @@ def test_live_template_kind_edit_is_rejected(engine):
     rejects(engine, operation)
 
 
+SHADOWABLE_TABLES = tuple(s.metadata.tables)
+
+
+def configure_shadow_writer(c):
+    """Assume an ordinary table-writer role with attacker-controlled temp names."""
+    role = "usc_shadow_writer_" + uuid4().hex[:10]
+    c.exec_driver_sql("CREATE ROLE " + role)
+    c.exec_driver_sql("GRANT USAGE ON SCHEMA public TO " + role)
+    c.exec_driver_sql("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO " + role)
+    c.exec_driver_sql("SET LOCAL ROLE " + role)
+    for table_name in SHADOWABLE_TABLES:
+        c.exec_driver_sql(
+            f"CREATE TEMP TABLE {table_name} (LIKE public.{table_name} INCLUDING ALL)"
+        )
+    c.exec_driver_sql("SET LOCAL search_path=pg_temp,public")
+    return role
+
+
+def test_shadow_relations_cannot_bypass_referenced_kind_guard(engine):
+    """A temp-schema attacker cannot make the D2 reference lookup vacuous."""
+    with engine.begin() as c:
+        plan = template(c, category=4)
+        paths = c.exec_driver_sql("""
+            SELECT proname, proconfig FROM pg_proc
+            WHERE oid IN ('public.usc_write_guard()'::regprocedure,
+                          'public.usc_validate_database()'::regprocedure)
+        """).all()
+        assert {name: config for name, config in paths} == {
+            "usc_write_guard": ["search_path=pg_catalog, public, pg_temp"],
+            "usc_validate_database": ["search_path=pg_catalog, public, pg_temp"],
+        }
+    with engine.connect() as c:
+        tx = c.begin()
+        try:
+            configure_shadow_writer(c)
+            with pytest.raises(sa.exc.IntegrityError):
+                with c.begin_nested():
+                    c.execute(sa.text(
+                        "UPDATE public.exercises SET measurement_kind='duration' WHERE id=:id"
+                    ), {"id": plan[1]})
+            c.exec_driver_sql("RESET ROLE")
+        finally:
+            tx.rollback()
+    with engine.connect() as c:
+        assert c.execute(sa.select(s.exercises.c.measurement_kind)
+                         .where(s.exercises.c.id == plan[1])).scalar_one() == "reps"
+        saved = c.execute(sa.select(s.template_sets)
+                          .where(s.template_sets.c.id == plan[3])).mappings().one()
+        assert saved["target_reps"] == 8 and saved["target_duration_seconds"] is None
+
+
+@pytest.mark.parametrize("case", ["last_set", "invalid_target", "category", "cancelled_active"])
+def test_shadow_relations_cannot_bypass_deferred_validation(engine, case):
+    """Public completeness, kind, and cancellation checks ignore temp shadows."""
+    with engine.begin() as c:
+        if case == "cancelled_active":
+            owner, workout, _, row_id = session(c)
+            original = ("session_set", row_id)
+        else:
+            plan = template(c)
+            original = ("template_set", plan[3])
+
+    with engine.connect() as c:
+        tx = c.begin()
+        try:
+            configure_shadow_writer(c)
+            with pytest.raises(sa.exc.IntegrityError):
+                with c.begin_nested():
+                    if case == "last_set":
+                        c.execute(sa.text("DELETE FROM public.template_sets WHERE id=:id"),
+                                  {"id": plan[3]})
+                    elif case == "invalid_target":
+                        c.execute(sa.text(
+                            "UPDATE public.template_sets SET target_reps=NULL WHERE id=:id"
+                        ), {"id": plan[3]})
+                    elif case == "category":
+                        c.execute(sa.text(
+                            "UPDATE public.exercises SET category_id=7 WHERE id=:id"
+                        ), {"id": plan[1]})
+                    else:
+                        c.execute(sa.text(
+                            "UPDATE public.session_sets SET status='cancelled' WHERE id=:id"
+                        ), {"id": row_id})
+                    c.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")
+            c.exec_driver_sql("RESET ROLE")
+        finally:
+            tx.rollback()
+
+    with engine.connect() as c:
+        if original[0] == "template_set":
+            row = c.execute(sa.select(s.template_sets)
+                            .where(s.template_sets.c.id == original[1])).mappings().one()
+            assert row["target_reps"] == 8
+            assert c.execute(sa.select(s.exercises.c.category_id)
+                             .where(s.exercises.c.id == plan[1])).scalar_one() == 1
+        else:
+            assert c.execute(sa.select(s.session_sets.c.status)
+                             .where(s.session_sets.c.id == original[1])).scalar_one() == "pending"
+
+
 def test_template_attach_and_kind_edit_serialize(engine):
     """D2 prevents a race from committing mismatched effective targets."""
     with engine.begin() as c:
@@ -372,6 +472,32 @@ def legacy_fixture(c, *, incomplete=False, cancelled=False, category=4):
     return ex, workout
 
 
+def legacy_template_preflight_conflict(c, case):
+    """Create one 0002 template conflict without using post-0002 columns."""
+    owner = c.exec_driver_sql(
+        "INSERT INTO users(display_name,preferred_weight_unit,status) "
+        "VALUES ('Synthetic preflight','kg','active') RETURNING id"
+    ).scalar_one()
+    plan = c.execute(sa.text(
+        "INSERT INTO workout_templates(name,template_type,owner_user_id) "
+        "VALUES ('Preflight plan','personal',:owner) RETURNING id"
+    ), {"owner": owner}).scalar_one()
+    if case == "empty_template":
+        return
+    ex = c.exec_driver_sql(
+        "INSERT INTO exercises(name,category_id,body_part_id,source_type) "
+        "VALUES ('Preflight exercise',1,1,'provider') RETURNING id"
+    ).scalar_one()
+    c.execute(sa.text(
+        "INSERT INTO provider_exercises(exercise_id,provider_name,provider_exercise_id,last_synced_at) "
+        "VALUES (:id,'synthetic',:key,now())"
+    ), {"id": ex, "key": str(ex)})
+    c.execute(sa.text(
+        "INSERT INTO template_exercises(template_id,exercise_id,position) "
+        "VALUES (:plan,:exercise,1)"
+    ), {"plan": plan, "exercise": ex})
+
+
 def capture_legacy_rows(c):
     """Capture exact pre-existing values, excluding only the newly backfilled field."""
     return {table: c.exec_driver_sql(
@@ -415,9 +541,16 @@ def test_upgrade_preserves_legacy_values_and_original_kind(engine, monkeypatch):
             db.dispose()
 
 
-@pytest.mark.parametrize("case", ["incomplete", "cancelled", "bodyweight_kind"])
-def test_legacy_conflicts_abort_without_repair(engine, monkeypatch, case):
-    """An incompatible published plan or cancelled history blocks the entire DDL."""
+@pytest.mark.parametrize(("case", "category"), [
+    ("empty_template", "empty_templates"),
+    ("zero_sets", "template_exercises_without_sets"),
+    ("invalid_target", "invalid_template_targets"),
+    ("cancelled_pending", "cancelled_sessions_with_pending_sets"),
+    ("bodyweight_kind", "incompatible_bodyweight_categories"),
+])
+def test_legacy_conflicts_report_counts_and_abort_without_repair(
+        engine, monkeypatch, case, category):
+    """Each preflight category reports its count and rolls back the entire DDL."""
     url = new_disposable_database(engine, "workout_conflict")
     with monkeypatch.context() as patch:
         patch.setenv("DATABASE_URL", url.render_as_string(hide_password=False))
@@ -431,11 +564,18 @@ def test_legacy_conflicts_abort_without_repair(engine, monkeypatch, case):
                     # Earlier metadata allowed editing this default. The new
                     # backfill must report it, not create an invalid exercise.
                     c.exec_driver_sql("UPDATE exercise_categories SET measurement_kind='duration_distance' WHERE id=4")
-                legacy_fixture(c, incomplete=case == "incomplete", cancelled=case == "cancelled")
+                    legacy_fixture(c)
+                elif case == "cancelled_pending":
+                    legacy_fixture(c, cancelled=True)
+                elif case == "invalid_target":
+                    legacy_fixture(c, incomplete=True)
+                else:
+                    legacy_template_preflight_conflict(c, case)
             with db.connect() as c:
                 before = capture_legacy_rows(c)
-            with pytest.raises(RuntimeError, match="conflicts"):
+            with pytest.raises(RuntimeError, match=rf"{category}=1") as failure:
                 command.upgrade(cfg, "head")
+            assert "No legacy data was changed" in str(failure.value)
             with db.connect() as c:
                 assert MigrationContext.configure(c).get_current_revision() == "0002_master_records"
                 assert "measurement_kind" not in {col["name"] for col in sa.inspect(c).get_columns("exercises")}

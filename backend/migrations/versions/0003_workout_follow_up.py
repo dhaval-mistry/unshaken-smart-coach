@@ -40,27 +40,33 @@ def upgrade():
     bind = op.get_bind()
     conflicts = bind.exec_driver_sql("""
         SELECT
-          (SELECT count(*) FROM workout_templates w WHERE NOT EXISTS
-            (SELECT FROM template_exercises t WHERE t.template_id=w.id)) +
-          (SELECT count(*) FROM template_exercises t WHERE NOT EXISTS
-            (SELECT FROM template_sets s WHERE s.template_exercise_id=t.id)) +
-          (SELECT count(*) FROM template_sets s
-            JOIN template_exercises t ON t.id=s.template_exercise_id
-            JOIN exercises e ON e.id=t.exercise_id
-            JOIN exercise_categories c ON c.id=e.category_id
-            WHERE NOT usc_measurement(c.measurement_kind,s.target_reps,
-              s.target_duration_seconds,s.target_distance_meters,true)),
-          (SELECT count(*) FROM session_sets s
-            JOIN session_exercises e ON e.id=s.session_exercise_id
-            JOIN workout_sessions w ON w.id=e.session_id
-            WHERE w.status='cancelled' AND s.status='pending'),
-          (SELECT count(*) FROM exercises e JOIN exercise_categories c ON c.id=e.category_id
+          (SELECT count(*) FROM public.workout_templates w WHERE NOT EXISTS
+            (SELECT FROM public.template_exercises t WHERE t.template_id=w.id))
+            AS empty_templates,
+          (SELECT count(*) FROM public.template_exercises t WHERE NOT EXISTS
+            (SELECT FROM public.template_sets s WHERE s.template_exercise_id=t.id))
+            AS template_exercises_without_sets,
+          (SELECT count(*) FROM public.template_sets s
+            JOIN public.template_exercises t ON t.id=s.template_exercise_id
+            JOIN public.exercises e ON e.id=t.exercise_id
+            JOIN public.exercise_categories c ON c.id=e.category_id
+            WHERE NOT public.usc_measurement(c.measurement_kind,s.target_reps,
+              s.target_duration_seconds,s.target_distance_meters,true))
+            AS invalid_template_targets,
+          (SELECT count(*) FROM public.session_sets s
+            JOIN public.session_exercises e ON e.id=s.session_exercise_id
+            JOIN public.workout_sessions w ON w.id=e.session_id
+            WHERE w.status='cancelled' AND s.status='pending')
+            AS cancelled_sessions_with_pending_sets,
+          (SELECT count(*) FROM public.exercises e
+            JOIN public.exercise_categories c ON c.id=e.category_id
             WHERE c.id=4 AND c.measurement_kind NOT IN ('reps','duration'))
-    """).one()
-    if any(conflicts):
+            AS incompatible_bodyweight_categories
+    """).mappings().one()
+    nonzero = [f"{category}={count}" for category, count in conflicts.items() if count]
+    if nonzero:
         raise RuntimeError(
-            "Workout migration conflicts: incomplete templates, invalid targets, "
-            "pending rows in cancelled workouts, or incompatible Bodyweight kinds. "
+            "Workout migration conflicts: " + ", ".join(nonzero) + ". "
             "No legacy data was changed."
         )
 
