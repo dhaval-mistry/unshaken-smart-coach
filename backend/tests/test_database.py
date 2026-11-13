@@ -38,9 +38,10 @@ def user(c):
     return c.execute(s.users.insert().values(display_name="Synthetic participant",preferred_weight_unit="kg",status="active").returning(s.users.c.id)).scalar_one()
 
 
-def exercise(c, owner=None, category=1):
+def exercise(c, owner=None, category=1, kind=None):
     """Insert a matching exercise and source subtype atomically."""
-    identifier=c.execute(s.exercises.insert().values(name="Synthetic exercise",category_id=category,body_part_id=1,source_type="custom" if owner else "provider").returning(s.exercises.c.id)).scalar_one()
+    effective_kind = kind or c.execute(sa.select(s.exercise_categories.c.measurement_kind).where(s.exercise_categories.c.id==category)).scalar_one()
+    identifier=c.execute(s.exercises.insert().values(name="Synthetic exercise",category_id=category,body_part_id=1,source_type="custom" if owner else "provider",measurement_kind=effective_kind).returning(s.exercises.c.id)).scalar_one()
     if owner:
         c.execute(s.custom_exercises.insert().values(exercise_id=identifier,created_by_user_id=owner))
     else:
@@ -53,8 +54,9 @@ def template(c, owner=None, exercise_id=None, category=1):
     identifier=c.execute(s.workout_templates.insert().values(name="Synthetic plan",template_type="personal" if owner else "sample",owner_user_id=owner).returning(s.workout_templates.c.id)).scalar_one()
     ex=exercise_id or exercise(c,category=category)
     entry=c.execute(s.template_exercises.insert().values(template_id=identifier,exercise_id=ex,position=1).returning(s.template_exercises.c.id)).scalar_one()
-    targets={"target_reps":8} if category<=6 else {"target_duration_seconds":600}
-    if category==7: targets["target_distance_meters"]="1500.000"
+    kind=c.execute(sa.select(s.exercises.c.measurement_kind).where(s.exercises.c.id==ex)).scalar_one()
+    targets={"target_reps":8} if kind=="reps" else {"target_duration_seconds":600}
+    if kind=="duration_distance": targets["target_distance_meters"]="1500.000"
     planned=c.execute(s.template_sets.insert().values(template_exercise_id=entry,set_number=1,**targets).returning(s.template_sets.c.id)).scalar_one()
     return identifier,ex,entry,planned
 
@@ -66,7 +68,7 @@ def session(c, owner=None, ex=None, source=None, seal=True, category=1):
     if source:
         source_id,ex,source_entry,source_set=source
     ex=ex or exercise(c,owner=owner,category=category)
-    original=c.execute(sa.select(s.exercises,s.exercise_categories.c.name.label("category_name"),s.exercise_categories.c.measurement_kind,s.body_parts.c.name.label("body_name")).join(s.exercise_categories).join(s.body_parts).where(s.exercises.c.id==ex)).mappings().one()
+    original=c.execute(sa.select(s.exercises,s.exercise_categories.c.name.label("category_name"),s.body_parts.c.name.label("body_name")).join(s.exercise_categories).join(s.body_parts).where(s.exercises.c.id==ex)).mappings().one()
     source_row=c.execute(sa.select(s.workout_templates).where(s.workout_templates.c.id==source_id)).mappings().one() if source_id else None
     w=c.execute(s.workout_sessions.insert().values(user_id=owner,name_snapshot="Synthetic workout",status="in_progress",
       source_template_id=source_id,source_template_id_snapshot=source_id,
@@ -101,7 +103,7 @@ def test_schema_and_seed_contract(engine):
     with engine.connect() as c:
         inspector=sa.inspect(c)
         assert set(inspector.get_table_names())==set(s.metadata.tables)|{"alembic_version"}
-        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==128
+        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==129
         # The human-readable dictionary is an independent nullability contract.
         import re
         design=(Path(__file__).resolve().parents[2]/'docs/database/design.md').read_text(encoding='utf-8')
@@ -133,7 +135,7 @@ def test_schema_and_seed_contract(engine):
             assert {i.name for i in table.indexes}<=actual_indexes
             assert {i.name for i in table.constraints if isinstance(i,sa.CheckConstraint)} <= {
                 i["name"] for i in inspector.get_check_constraints(table.name)}
-        assert MigrationContext.configure(c).get_current_revision()=="0002_master_records"
+        assert MigrationContext.configure(c).get_current_revision()=="0003_workout_follow_up"
         cats=c.execute(sa.select(s.exercise_categories).order_by(s.exercise_categories.c.sort_order)).mappings().all()
         assert [x["name"] for x in cats]==["Barbell","Dumbbell","Machine/Other","Bodyweight","Assisted Bodyweight","Reps Only","Cardio","Duration"]
         assert [x["id"] for x in cats]==list(range(1,9))
@@ -189,7 +191,7 @@ def test_exact_source_subtype(engine,case):
     """Subtype guards run at transaction end and reject missing, wrong and duplicate subtypes."""
     def operation(c):
         u=user(c)
-        ex=c.execute(s.exercises.insert().values(name="Invalid source",source_type="provider",category_id=1,body_part_id=1).returning(s.exercises.c.id)).scalar_one()
+        ex=c.execute(s.exercises.insert().values(name="Invalid source",source_type="provider",category_id=1,body_part_id=1,measurement_kind="reps").returning(s.exercises.c.id)).scalar_one()
         if case in ("wrong","both"): c.execute(s.custom_exercises.insert().values(exercise_id=ex,created_by_user_id=u))
         if case=="both": c.execute(s.provider_exercises.insert().values(exercise_id=ex,provider_name="exercisedb",provider_exercise_id=str(uuid4()),last_synced_at=sa.func.now()))
     rejects(engine,operation)
@@ -314,7 +316,7 @@ def test_plan_and_repeat_upgrade_are_read_only_at_head(engine):
     """No migration/seed recreation at head and stale approval tokens fail."""
     with engine.connect() as c:
         details,token=migration_plan(c,database_url())
-        assert details["current_revision"]=="0002_master_records" and details["planned_migrations"]==[]
+        assert details["current_revision"]=="0003_workout_follow_up" and details["planned_migrations"]==[]
         count=c.execute(sa.select(sa.func.count()).select_from(s.exercise_categories)).scalar_one()
     config=alembic_config()
     config.attributes["disposable_test"]=True
