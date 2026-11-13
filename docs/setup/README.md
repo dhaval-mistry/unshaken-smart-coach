@@ -14,9 +14,13 @@ Team members using Codex or Claude Code can also configure the
 The [observability setup guide](observability.md) describes the optional local
 Grafana, Alloy, Mimir, Loki and Tempo stack and its verification limits.
 
+The FastAPI backend currently runs on the host. Its owner-approved
+[local container design](../architecture/backend-container.md) is not yet
+implemented; the backend Dockerfile, Compose service and container commands do
+not exist.
+
 Before coding, follow the [developer reading path](../README.md) and review the
 relevant designs in the [architecture index](../architecture/README.md).
 
-The backend guide distinguishes current prerequisites from commands that will
-become available when the FastAPI application is scaffolded. Frontend setup
-will be added when frontend development begins.
+The backend guide documents the implemented host-run application and database
+tools. Frontend setup will be added when frontend development begins.

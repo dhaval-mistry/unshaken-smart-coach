@@ -6,9 +6,12 @@ lives in the repository's root README.
 
 - [Local observability design](observability.md): approved Alloy collection and
   Mimir metrics direction with Grafana, Loki, Tempo and OpenTelemetry. Local
-  single-process filesystem storage and application-only log collection are approved;
-  implementation remains pending.
+  single-process filesystem storage and application-only log collection are
+  approved; the local stack and shared telemetry package are implemented.
 - [System overview](overview.md): planned components and folder responsibilities.
+- [Local backend container design](backend-container.md): owner-approved
+  immutable Python 3.12 image, Compose service, configuration boundaries,
+  explicit migrations and verification; not implemented.
 - [Database design](../database/design.md): tables, relationships and history.
 - [Database diagrams](../database/README.md): diagrams matching the design.
 - [Initial API design](../api/foundation.md): proposed endpoints and response rules.
@@ -19,10 +22,11 @@ lives in the repository's root README.
 - [Workout API design](../api/workouts.md): template/start/completion/Finish/
   cancellation/history contracts and unresolved mapping/retry choices.
 
-The current application exposes liveness only; database revisions 0001/0002
-and the shared telemetry helpers/examples exist. The workout schema follow-up
-is proposed, not implemented on main. This design-only review preserves that
-boundary and does not accept closed PR #33's implementation.
+The current application exposes liveness only; database revisions 0001–0003 and
+the shared telemetry helpers/examples exist. PR #37 implemented the approved
+workout schema follow-up on main; product workout APIs remain unimplemented.
+PostgreSQL and the optional observability stack have Compose services, but the
+FastAPI backend does not yet have a Dockerfile or Compose service.
 
 ## Keeping designs useful
 

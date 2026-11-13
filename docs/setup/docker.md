@@ -1,7 +1,10 @@
 # Install Docker
 
-Docker will run PostgreSQL and, later, other local project dependencies in a
-consistent environment.
+Docker currently runs PostgreSQL and the optional observability profile in a
+consistent environment. The owner-approved design for running FastAPI in Docker
+is documented in the
+[local backend container design](../architecture/backend-container.md). No
+backend Dockerfile or Compose service exists yet.
 
 ## Windows
 
