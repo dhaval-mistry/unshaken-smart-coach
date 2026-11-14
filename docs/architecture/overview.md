@@ -24,7 +24,11 @@ PostgreSQL 17. The backend contains database migrations, schema and tests.
 The shared Python telemetry package and synthetic FastAPI/script examples are
 implemented. A minimal FastAPI application (`backend/app/main.py`) provides
 `GET /health/live` and the shared response and error behavior. Product API
-endpoints and React remain future work.
+endpoints and React remain future work. Database revision
+`0003_workout_follow_up` is implemented through PR #37. The root Compose file
+currently runs PostgreSQL and optional observability services; it does not yet
+build or run the FastAPI backend. See the owner-approved
+[local backend container design](backend-container.md).
 
 ## Planned components
 
@@ -53,8 +57,18 @@ completed sets, in one database transaction. **Save** retains completed sets
 and marks unfinished sets and exercises cancelled in partial history. The
 database's one-active-workout index and terminal-history protection still
 apply. The [database design](../database/design.md#approved-follow-up-design-timed-bodyweight-template-save-and-cancel)
-and [workout API proposal](../api/workouts.md) explain the required new
-migration and open choices. The current code does not implement these changes.
+and [workout API proposal](../api/workouts.md) explain the database rules and
+remaining API choices. Revision `0003_workout_follow_up` implements the schema
+and guard changes; the product workout APIs do not implement these actions yet.
+
+## Local backend container boundary
+
+The approved local direction keeps one backend artifact for the API and
+explicit migration commands. The [container design](backend-container.md)
+specifies a non-root, read-only Python 3.12 image and loopback-only Compose
+service. Startup serves Uvicorn only: it never applies migrations, creates
+tables/seeds, or resets data. Observability remains optional and container logs
+are not collected.
 
 Example: when a user completes a set, the application records performance and
 starts rest according to the database design. A trace can show how long that

@@ -7,6 +7,11 @@ The verified interpreter was Python 3.12.10 on Windows. A minimal FastAPI
 application with a liveness check is available; see
 [Run the API locally](#run-the-api-locally).
 
+The implemented path runs the API on the host. The owner-approved
+[local backend container design](../architecture/backend-container.md) defines
+the future image and Compose contract; its container commands are unavailable
+until a later Developer implements them.
+
 The shared Python telemetry package and synthetic FastAPI/script examples are
 now available. Product endpoints remain separate work. See
 [telemetry examples](../../backend/examples/README.md) and
@@ -72,6 +77,9 @@ For a fresh database the normal plan is:
    timestamp/ownership/history/snapshot/measurement guards.
 2. `0002_master_records`: stable 8 categories and 11 body parts, including
    explicit None and category measurement kinds.
+3. `0003_workout_follow_up`: effective exercise kinds, complete saved-template
+   guards, cancelled-set consistency, and narrowly authorized active-draft
+   discard while preserving terminal history.
 
 Alembic also owns its separate `alembic_version` tracking table. That is not
 a fourteenth application table.
@@ -119,7 +127,7 @@ match. A conflicting ID/name/order/value stops the migration without replacing
 custom data. Fix conflicts through a separately reviewed change; do not edit an
 already applied migration or reset the volume.
 
-## Run the API locally
+## Run the API locally on the host
 
 From `backend/`, start the FastAPI application:
 
@@ -252,10 +260,13 @@ standalone deployed wheel. Runtime checks were on Windows/Docker Desktop;
 other operating systems were not exercised in this task. Database-backed API
 endpoints remain separate implementation stories.
 
-## Local verification evidence
+## Historical foundation verification evidence
 
-Verified uncommitted working tree on `feature/database-foundation-local`, based
-on main `c42d624`. No commit or GitHub publication was made by this task.
+The evidence below predates merged revision `0003_workout_follow_up`; it proves
+the original 0001/0002 foundation, not current migration head or the approved
+backend container. Current main includes 0003 through PR #37. The historical
+run used an uncommitted working tree on `feature/database-foundation-local`,
+based on main `c42d624`; no commit or GitHub publication was made by that task.
 Environment: Python 3.12.10, PostgreSQL 17.11, Docker Engine 29.7.2 and Compose
 5.5.0 on Windows. Locked libraries include SQLAlchemy 2.0.55, Alembic 1.20.1
 and Psycopg 3.3.6.
