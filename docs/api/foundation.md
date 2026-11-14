@@ -6,7 +6,8 @@ and private-route contracts require review; existing approvals are not reopened.
 
 Implementation status: **Partially implemented**. The FastAPI application,
 shared response and error behavior, and `GET /health/live` exist (issue #12).
-Readiness and lookup endpoints are not implemented yet.
+`GET /health/ready` exists (issue #13). The lookup endpoints are not
+implemented yet.
 
 Related context: [system overview](../architecture/overview.md),
 [database design](../database/design.md), [ER diagram](../database/er-diagram.mmd),
@@ -156,7 +157,9 @@ FastAPI allows custom handlers for HTTP and request-validation errors; the
 Developer must implement and verify the agreed format, including unexpected
 errors. See the [official error-handling guide](https://fastapi.tiangolo.com/tutorial/handling-errors/).
 The safe envelope is implemented for #12, not FastAPI's default response.
-The 503 dependency cases above remain future implementation work.
+The 503 readiness cases (`database_unavailable` and
+`reference_data_unavailable`) are implemented for #13; the lookup endpoints'
+503 cases remain future implementation work.
 
 ## Check the running backend
 

@@ -386,7 +386,8 @@ Never include resolved Compose output or private values in evidence.
 
 ## Limitations and review boundary
 
-- `/health/live` proves only that the process can answer. `/health/ready` and
+- `/health/live` proves only that the process can answer. `/health/ready`
+  proves that the process can read both lookup tables within three seconds;
   product database endpoints are not implemented.
 - PostgreSQL `service_healthy` start ordering is not application readiness or
   proof that migrations are current.

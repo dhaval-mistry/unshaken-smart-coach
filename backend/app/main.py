@@ -1,5 +1,6 @@
 """FastAPI application entry point for the UNShaken backend."""
 
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,7 +27,7 @@ Application-wide routing errors, which no single operation lists:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Own the shared telemetry lifecycle for this server process.
+    """Own the shared telemetry lifecycle and the readiness database pool.
 
     Telemetry is started once here, not at import time or per request, so a
     process never installs duplicate exporters. The shared helpers decide
@@ -35,11 +36,19 @@ async def lifespan(_app: FastAPI):
     background workers without changing HTTP responses. `shutdown()` waits at
     most a few seconds to flush and reports, rather than raises, a failed
     flush. `finally` makes shutdown run even if serving stops with an error.
+
+    The database pool is created lazily by the first readiness check, so it is
+    only disposed here if this process ever loaded it.
     """
     initialize(service="unshaken-backend")
     try:
         yield
     finally:
+        # The pool module loads on the first database-backed request, so a
+        # process that never needed PostgreSQL has nothing to dispose.
+        pool = sys.modules.get("app.db.pool")
+        if pool is not None:
+            pool.dispose_engine()
         shutdown()
 
 

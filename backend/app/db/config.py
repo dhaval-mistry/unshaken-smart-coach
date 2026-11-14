@@ -26,6 +26,11 @@ def database_url() -> URL:
         raise ValueError("Set a valid private PostgreSQL DATABASE_URL; no connection details are displayed.") from None
 
 
-def database_engine(url: URL | None = None):
+def database_engine(url: URL | None = None, *, connect_timeout: int = 5, **pool_options):
     """Build a quiet engine with bounded connection time and hidden parameters."""
-    return create_engine(url or database_url(), hide_parameters=True, connect_args={"connect_timeout": 5})
+    return create_engine(
+        url or database_url(),
+        hide_parameters=True,
+        connect_args={"connect_timeout": connect_timeout},
+        **pool_options,
+    )
