@@ -22,7 +22,8 @@ lives in the repository's root README.
 - [Workout API design](../api/workouts.md): template/start/completion/Finish/
   cancellation/history contracts and unresolved mapping/retry choices.
 
-The current application exposes liveness only; database revisions 0001–0003 and
+The current application exposes liveness and readiness (`/health/live` and
+`/health/ready`); database revisions 0001–0003 and
 the shared telemetry helpers/examples exist. PR #37 implemented the approved
 workout schema follow-up on main; product workout APIs remain unimplemented.
 PostgreSQL and the optional observability stack have Compose services, but the

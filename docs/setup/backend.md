@@ -4,7 +4,7 @@ The database foundation uses **Python 3.12**, uv, SQLAlchemy Core, Psycopg 3,
 and Alembic. `backend/.python-version` selects the Python minor version;
 `backend/pyproject.toml` declares dependencies and `uv.lock` locks them.
 The verified interpreter was Python 3.12.10 on Windows. A minimal FastAPI
-application with a liveness check is available; see
+application with liveness and readiness checks is available; see
 [Run the API locally](#run-the-api-locally).
 
 The implemented path runs the API on the host. The owner-approved
@@ -156,10 +156,44 @@ observability stack is not running, export attempts fail in the background and
 log connection warnings without changing HTTP responses. To silence them during
 local development, set `OTEL_SDK_DISABLED=true` in your private root `.env`.
 
+### Check readiness
+
+```text
+curl -i http://127.0.0.1:8000/health/ready
+```
+
+Expect `200` with `{"status":"ready"}` when the backend can read at least one
+active row from both `exercise_categories` and `body_parts`. The route uses the
+private `DATABASE_URL`, but neither startup nor liveness connects to PostgreSQL;
+the shared connection pool is created on the first readiness request.
+
+| Result | Meaning |
+|---|---|
+| `200` `{"status":"ready"}` | Both lookup tables were read and have active rows |
+| `503` `database_unavailable` | PostgreSQL is unreachable, or pool wait, connection, or read did not finish in time |
+| `503` `reference_data_unavailable` | A lookup table is missing or has no active rows |
+| `500` `internal_error` | Unexpected failure, including an invalid `DATABASE_URL` |
+
+The check answers within three seconds in total, including pool wait and reads,
+and always releases its connection. It uses a read-only transaction and never
+creates tables, runs migrations, or repairs data. Telemetry and external
+providers do not affect the result. Only state changes are logged, using fixed
+fields without SQL, connection details, or credentials. After PostgreSQL
+restarts, one check may report `database_unavailable` while stale pooled
+connections are discarded; the next check reconnects.
+
+These three checks answer different questions; none substitutes for another:
+
+| Check | Command | Proves | Does not prove |
+|---|---|---|---|
+| Container health | `docker compose ps` | PostgreSQL accepts connections | The application tables exist or the API can read them |
+| API readiness | `GET /health/ready` | This API process can read both lookup tables and each has active rows | All tables, constraints, or that migrations are at head |
+| Migration verification | `uv run alembic current` and `uv run alembic check` | The installed revision and schema match the migrations | That an API process is running or can reach the database |
+
 Errors use the shared envelope from the
 [initial API design](../api/foundation.md#shared-errors), with `422`
 `invalid_request`, `404` `not_found`, `405` `method_not_allowed` (with `Allow`),
-and `500` `internal_error`. Error messages never include submitted input,
+`503` readiness failures, and `500` `internal_error`. Error messages never include submitted input,
 stack traces, or connection details.
 
 Paths are matched exactly. A trailing slash such as `/health/live/` returns the
@@ -181,8 +215,9 @@ They call the application in-process with FastAPI's `TestClient`. Telemetry
 startup is replaced with no-op functions, except one test that runs real
 telemetry against an unreachable endpoint in a separate process. Another test
 confirms that importing and calling the application never loads database code.
-Running plain `uv run pytest` also collects the PostgreSQL integration tests
-below, which require `TEST_DATABASE_URL`.
+Readiness behavior in these tests uses clearly identified test doubles. Running
+plain `uv run pytest` also collects the PostgreSQL integration tests below,
+including live readiness checks, which require `TEST_DATABASE_URL`.
 
 ## Testing without touching development data
 
