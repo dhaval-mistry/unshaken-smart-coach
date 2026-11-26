@@ -7,10 +7,9 @@ The verified interpreter was Python 3.12.10 on Windows. A minimal FastAPI
 application with a liveness check is available; see
 [Run the API locally](#run-the-api-locally).
 
-The implemented path runs the API on the host. The owner-approved
+The API can run on the host or as the local Compose `backend` service. The
 [local backend container design](../architecture/backend-container.md) defines
-the future image and Compose contract; its container commands are unavailable
-until a later Developer implements them.
+the implemented image, runtime, security and lifecycle boundaries.
 
 The shared Python telemetry package and synthetic FastAPI/script examples are
 now available. Product endpoints remain separate work. See
@@ -168,6 +167,94 @@ document at `/openapi.json` (shown as interactive docs at `/docs`) lists the
 liveness `200`, `422` and `500` responses with the shared error schema and
 headers; app-wide `404` and `405` behavior is described in its API description,
 shown at the top of `/docs`.
+
+## Run the API in Docker
+
+Keep the root `.env` private. In addition to the existing `POSTGRES_*`
+settings, set `BACKEND_CONTAINER_DATABASE_URL` to the same empty/local database
+using Compose hostname `postgres` and container port `5432`. Percent-encode
+reserved credential characters. Do not print the URL or use a loopback hostname
+inside the container. The safe `.env.example` shows the required shape.
+Compose configuration and PostgreSQL/observability-only commands remain usable
+when this setting is absent. Starting the backend or its one-off migration CLI
+fails with a fixed, nonsecret error until the value names `postgres:5432` and
+contains concrete, non-placeholder database credentials and database name.
+
+From the repository root, validate configuration without rendering private
+values, then build and start PostgreSQL and the API:
+
+```text
+docker compose config --quiet
+docker compose build backend
+docker compose up -d --wait postgres backend
+```
+
+The backend image uses the committed lock, contains no development dependencies
+or uv executable, runs as UID/GID `10001`, and starts one Uvicorn process with
+no reload or host source mount. Compose publishes only
+`127.0.0.1:${BACKEND_PORT:-8000}`, uses a read-only root filesystem with a
+bounded temporary filesystem, drops all capabilities, and applies local CPU,
+memory and process limits.
+
+Use these endpoints (substitute a private `BACKEND_PORT` override if needed):
+
+- liveness: `http://127.0.0.1:8000/health/live`
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
+
+`/health/live` is process liveness only. The PostgreSQL healthy dependency
+orders initial container startup; neither it nor liveness proves migrations or
+application readiness. Starting, health-checking, restarting, rebuilding, and
+stopping the backend never runs migrations or changes database rows.
+
+Review backend status and logs without rendering configuration:
+
+```text
+docker compose ps --all backend
+docker compose logs --tail 100 backend
+docker compose restart backend
+docker compose stop -t 10 backend
+```
+
+Stopping the stateless backend leaves PostgreSQL and named volumes intact. Do
+not use `docker compose down -v` as a normal stop or rebuild command.
+
+### Explicit migrations from the image
+
+The same image provides the existing guarded database CLI. Start PostgreSQL,
+preview the nonsecret target and revisions, and obtain the database owner's
+approval before changing an existing/local/shared target:
+
+```text
+docker compose up -d --wait postgres
+docker compose run --rm --no-deps backend unshaken-db plan
+```
+
+Only after approving that exact current plan:
+
+```text
+docker compose run --rm --no-deps backend unshaken-db upgrade --approve-target TOKEN_FROM_CURRENT_PLAN
+```
+
+A missing, wrong, or stale token makes no schema change. The one-off container
+publishes no API port. Automatic migration, seeding, reset, and downgrade are
+not part of backend startup.
+
+### Optional container telemetry
+
+Container telemetry defaults off independently of host telemetry. To opt in,
+set `BACKEND_CONTAINER_OTEL_SDK_DISABLED=false` privately, keep
+`BACKEND_CONTAINER_OTEL_ENDPOINT=http://alloy:4318`, and explicitly start the
+existing observability profile:
+
+```text
+docker compose --profile observability up -d --build --wait postgres alloy mimir loki tempo grafana backend
+```
+
+The service has no dependency on Alloy. An unavailable exporter may lose local
+signals but must not change liveness or application results. Never use
+`127.0.0.1:4318` for an exporter inside the backend container because that
+address points back to the container itself.
 
 ### HTTP contract tests
 

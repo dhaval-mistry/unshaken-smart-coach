@@ -1,0 +1,57 @@
+# Deny by default so new local files, credentials, tests and build output cannot
+# silently enter the image build context. Keep this allowlist synchronized with
+# the Dockerfile's explicit COPY instructions.
+**
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!alembic.ini
+
+# Every admitted directory is immediately emptied again before its reviewed
+# file types are allowed. Docker strips trailing slashes from patterns, so a
+# directory exception by itself would recursively re-include arbitrary files.
+!app/
+app/*
+!app/*.py
+!app/api/
+app/api/*
+!app/api/*.py
+!app/db/
+app/db/*
+!app/db/*.py
+!app/telemetry/
+app/telemetry/*
+!app/telemetry/*.py
+
+!migrations/
+migrations/*
+!migrations/*.py
+!migrations/*.mako
+!migrations/*.sql
+!migrations/versions/
+migrations/versions/*
+!migrations/versions/*.py
+!migrations/versions/*.sql
+
+# Defense in depth: host-generated and private artifacts stay excluded after
+# every allowance, including if a reviewed directory is expanded later.
+**/__pycache__/
+**/*.py[cod]
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+**/.private*
+**/private.*
+**/*credential*
+**/*secret*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.log
+**/*.tmp
+**/*.temp
+**/*~
+**/.DS_Store
+**/Thumbs.db

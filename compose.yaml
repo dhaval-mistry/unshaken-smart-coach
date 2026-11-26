@@ -1,6 +1,50 @@
 name: unshaken-smart-coach
 
 services:
+  backend:
+    image: unshaken-backend:${BACKEND_SOURCE_COMMIT:-local-uncommitted}
+    build:
+      context: ./backend
+      args:
+        SOURCE_COMMIT: ${BACKEND_SOURCE_COMMIT:-local-uncommitted}
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    cpus: 1.0
+    mem_limit: 512m
+    stop_grace_period: 10s
+    environment:
+      # Keep the model usable for postgres/observability-only commands. The
+      # backend image rejects an absent, placeholder, or non-private URL before
+      # executing Uvicorn or a one-off database command.
+      DATABASE_URL: ${BACKEND_CONTAINER_DATABASE_URL:-}
+      OTEL_SDK_DISABLED: ${BACKEND_CONTAINER_OTEL_SDK_DISABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${BACKEND_CONTAINER_OTEL_ENDPOINT:-http://alloy:4318}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          response = urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=1);
+          assert response.status == 200 and json.load(response) == {'status': 'alive'}
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 10s
+
   postgres:
     image: postgres:17-alpine
     container_name: unshaken-postgres
