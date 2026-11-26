@@ -112,12 +112,18 @@ class ComposeConfigurationTests(unittest.TestCase):
         self.assertEqual(active[0], "**")
         for required in (
             "!Dockerfile",
-            "!app/**/*.py",
-            "!migrations/**/*.py",
-            "!migrations/**/*.mako",
-            "!migrations/**/*.sql",
+            "!app/*.py",
+            "!app/api/*.py",
+            "!app/db/*.py",
+            "!app/telemetry/*.py",
+            "!migrations/*.py",
+            "!migrations/*.mako",
+            "!migrations/versions/*.py",
+            "!migrations/versions/*.sql",
         ):
             self.assertIn(required, active)
+        self.assertNotIn("!app/**/", active)
+        self.assertNotIn("!migrations/**/", active)
         # Dockerignore uses last-match-wins. Host/private exclusions must stay
         # after all directory traversal and source/resource allowances.
         last_allowance = max(i for i, rule in enumerate(active) if rule.startswith("!"))
@@ -140,7 +146,10 @@ class ComposeConfigurationTests(unittest.TestCase):
                 "uv.lock": "synthetic lock\n",
                 "alembic.ini": "[alembic]\n",
                 "app/main.py": "VALUE = 'synthetic'\n",
-                "app/nested/helper.py": "HELPER = True\n",
+                "app/container_entrypoint.py": "VALUE = 'synthetic'\n",
+                "app/api/health.py": "VALUE = 'synthetic'\n",
+                "app/db/config.py": "VALUE = 'synthetic'\n",
+                "app/telemetry/setup.py": "VALUE = 'synthetic'\n",
                 "migrations/env.py": "# synthetic migration environment\n",
                 "migrations/script.py.mako": "synthetic template\n",
                 "migrations/versions/0001.py": "# synthetic revision\n",
@@ -152,8 +161,15 @@ class ComposeConfigurationTests(unittest.TestCase):
                 "app/nested/private.key": b"synthetic private key marker",
                 "app/nested/debug.log": b"synthetic log marker",
                 "app/nested/temp.tmp": b"synthetic temp marker",
+                "app/nested/opaque.json": b'{"synthetic": true}',
+                "app/nested/notes.txt": b"synthetic notes marker",
+                "app/nested/token.txt": b"synthetic token marker",
+                "app/.venv/lib/tool.py": b"SYNTHETIC = True\n",
+                "app/venv/lib/tool.py": b"SYNTHETIC = True\n",
                 "migrations/versions/__pycache__/0001.cpython-312.pyc": b"synthetic bytecode",
                 "migrations/versions/credentials.json": b'{"synthetic": true}',
+                "migrations/nested/opaque.json": b'{"synthetic": true}',
+                "migrations/.venv/lib/tool.py": b"SYNTHETIC = True\n",
             }
 
             for relative, content in allowed.items():
