@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.api import health
+from app.db.readiness import ReadinessResult, ReadinessState
 
 
 @pytest.fixture
@@ -194,6 +195,76 @@ def test_openapi_documents_shared_response_contract(client):
     description = schema["info"]["description"]
     assert "not_found" in description
     assert "method_not_allowed" in description
+
+
+class FakeReadinessResources:
+    """Deterministic readiness outcome for HTTP contract tests."""
+
+    def __init__(self, state):
+        self.result = ReadinessResult(state, 0.01)
+
+    async def check(self):
+        return self.result
+
+    def record_state(self, _result, _request_id):
+        return None
+
+
+@pytest.mark.parametrize(
+    ("state", "status_code", "code"),
+    [
+        (ReadinessState.READY, 200, None),
+        (ReadinessState.DATABASE_UNAVAILABLE, 503, "database_unavailable"),
+        (
+            ReadinessState.REFERENCE_DATA_UNAVAILABLE,
+            503,
+            "reference_data_unavailable",
+        ),
+        (ReadinessState.INTERNAL_ERROR, 500, "internal_error"),
+    ],
+)
+def test_ready_returns_shared_contract(
+    client,
+    monkeypatch,
+    state,
+    status_code,
+    code,
+):
+    monkeypatch.setattr(
+        health,
+        "_get_database_readiness",
+        lambda _app: FakeReadinessResources(state),
+    )
+    response = client.get("/health/ready")
+    assert response.status_code == status_code
+    assert_shared_headers(response)
+    if code is None:
+        assert response.json() == {"status": "ready"}
+    else:
+        assert_error(response, status_code, code)
+
+
+def test_ready_contract_accepts_no_extra_input(client, monkeypatch):
+    monkeypatch.setattr(
+        health,
+        "_get_database_readiness",
+        lambda _app: FakeReadinessResources(ReadinessState.READY),
+    )
+    assert_error(
+        client.get("/health/ready?unexpected=private"),
+        422,
+        "invalid_request",
+    )
+
+
+def test_openapi_documents_exact_readiness_response(client):
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/health/ready"]["get"]
+    ref = operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    model = schema["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+    assert model["required"] == ["status"]
+    assert model["properties"]["status"]["const"] == "ready"
+    assert set(operation["responses"]) >= {"200", "422", "500", "503"}
 
 
 def run_isolated(code: str, **env: str) -> subprocess.CompletedProcess:

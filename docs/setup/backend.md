@@ -150,6 +150,30 @@ process can answer: it does not contact PostgreSQL, exercise providers, AI, or
 telemetry stores, so it still returns `200` when they are unavailable. Startup
 does not run migrations, create tables, or load seeds.
 
+Check bounded database readiness separately:
+
+```text
+curl -i http://127.0.0.1:8000/health/ready
+```
+
+With a migrated PostgreSQL database and at least one active row in both
+`exercise_categories` and `body_parts`, it returns `200`
+`{"status":"ready"}`. The check has one three-second deadline, including
+executor queueing, pool wait, connection, reads, cleanup, and response
+handling. It does not migrate, seed, repair, write, or verify every table.
+
+A missing lookup table or no active lookup row returns `503` with
+`reference_data_unavailable`. Invalid configuration, outage, permission,
+pool, or read timeout failures return `503` with `database_unavailable`.
+Incompatible schema and unexpected application failures return `500` with
+`internal_error`. PostgreSQL and application errors are hidden from responses
+and process logs.
+
+Readiness is not migration verification and does not replace container
+health. Use PostgreSQL container health for the database process, migration
+commands or `alembic current/check` for the schema revision, and
+`GET /health/ready` for bounded application reads.
+
 Telemetry starts once at application startup through `app.telemetry`. When the
 observability stack is not running, export attempts fail in the background and
 log connection warnings without changing HTTP responses. To silence them during
@@ -199,13 +223,16 @@ memory and process limits.
 Use these endpoints (substitute a private `BACKEND_PORT` override if needed):
 
 - liveness: `http://127.0.0.1:8000/health/live`
+- readiness: `http://127.0.0.1:8000/health/ready`
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 
-`/health/live` is process liveness only. The PostgreSQL healthy dependency
-orders initial container startup; neither it nor liveness proves migrations or
-application readiness. Starting, health-checking, restarting, rebuilding, and
-stopping the backend never runs migrations or changes database rows.
+`/health/live` is process liveness only. `/health/ready` is the bounded
+application/database read check and is not container health or migration
+verification. The PostgreSQL healthy dependency orders initial container
+startup; neither it nor liveness proves migrations or application readiness.
+Starting, health-checking, restarting, rebuilding, and stopping the backend
+never runs migrations or changes database rows.
 
 Review backend status and logs without rendering configuration:
 
