@@ -106,23 +106,79 @@ class ComposeConfigurationTests(unittest.TestCase):
         self.assertEqual(backend["image"], "unshaken-backend:test-commit")
 
     def test_backend_context_is_deny_by_default(self):
-        """Only reviewed runtime inputs are admitted to the Docker context."""
+        """Only reviewed source/resource extensions are explicitly admitted."""
         rules = (ROOT / "backend" / ".dockerignore").read_text().splitlines()
         active = [line for line in rules if line and not line.startswith("#")]
         self.assertEqual(active[0], "**")
-        self.assertEqual(
-            set(active[1:]),
-            {
-                "!Dockerfile",
-                "!pyproject.toml",
-                "!uv.lock",
-                "!alembic.ini",
-                "!app/",
-                "!app/**",
-                "!migrations/",
-                "!migrations/**",
-            },
-        )
+        for required in (
+            "!Dockerfile",
+            "!app/**/*.py",
+            "!migrations/**/*.py",
+            "!migrations/**/*.mako",
+            "!migrations/**/*.sql",
+        ):
+            self.assertIn(required, active)
+        # Dockerignore uses last-match-wins. Host/private exclusions must stay
+        # after all directory traversal and source/resource allowances.
+        last_allowance = max(i for i, rule in enumerate(active) if rule.startswith("!"))
+        for exclusion in ("**/__pycache__/", "**/*.py[cod]", "**/.env.*", "**/*.key"):
+            self.assertGreater(active.index(exclusion), last_allowance)
+
+    def test_backend_context_excludes_nested_host_artifacts(self):
+        """BuildKit receives source/resources but no synthetic host-private files."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = root / "context"
+            output = root / "output"
+            context.mkdir()
+            output.mkdir()
+            shutil.copyfile(ROOT / "backend" / ".dockerignore", context / ".dockerignore")
+
+            allowed = {
+                "Dockerfile": "FROM scratch\nCOPY . /\n",
+                "pyproject.toml": "[project]\nname='synthetic'\nversion='0'\n",
+                "uv.lock": "synthetic lock\n",
+                "alembic.ini": "[alembic]\n",
+                "app/main.py": "VALUE = 'synthetic'\n",
+                "app/nested/helper.py": "HELPER = True\n",
+                "migrations/env.py": "# synthetic migration environment\n",
+                "migrations/script.py.mako": "synthetic template\n",
+                "migrations/versions/0001.py": "# synthetic revision\n",
+                "migrations/versions/guard.sql": "SELECT 1;\n",
+            }
+            excluded = {
+                "app/__pycache__/main.cpython-312.pyc": b"synthetic bytecode",
+                "app/nested/.env": b"SYNTHETIC_PRIVATE_VALUE=not-a-secret",
+                "app/nested/private.key": b"synthetic private key marker",
+                "app/nested/debug.log": b"synthetic log marker",
+                "app/nested/temp.tmp": b"synthetic temp marker",
+                "migrations/versions/__pycache__/0001.cpython-312.pyc": b"synthetic bytecode",
+                "migrations/versions/credentials.json": b'{"synthetic": true}',
+            }
+
+            for relative, content in allowed.items():
+                target = context / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+            for relative, content in excluded.items():
+                target = context / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+
+            result = subprocess.run(
+                [
+                    "docker", "build", "--no-cache", "--quiet",
+                    "--output", f"type=local,dest={output}", str(context),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for relative in allowed:
+                self.assertTrue((output / relative).is_file(), relative)
+            for relative in excluded:
+                self.assertFalse((output / relative).exists(), relative)
 
     def test_unrelated_model_works_with_backend_url_absent_or_empty(self):
         """PostgreSQL and observability configuration never requires backend setup."""
