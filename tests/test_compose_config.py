@@ -9,13 +9,17 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+VALID_BACKEND_URL = (
+    "postgresql://compose_test:synthetic@postgres:5432/compose_test"
+)
+_UNSET = object()
 
 
 @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI is unavailable")
 class ComposeConfigurationTests(unittest.TestCase):
     """Render configuration privately; the database itself is never started."""
 
-    def render(self, password=None):
+    def render(self, password=None, backend_database_url=_UNSET):
         """Ignore private settings and return only synthetic configuration."""
         environment = {key: value for key, value in os.environ.items() if not key.startswith("POSTGRES_")}
         environment = {
@@ -23,9 +27,8 @@ class ComposeConfigurationTests(unittest.TestCase):
             for key, value in environment.items()
             if not key.startswith("BACKEND_")
         }
-        environment["BACKEND_CONTAINER_DATABASE_URL"] = (
-            "postgresql://compose_test:synthetic@postgres:5432/compose_test"
-        )
+        if backend_database_url is not _UNSET:
+            environment["BACKEND_CONTAINER_DATABASE_URL"] = backend_database_url
         environment["BACKEND_SOURCE_COMMIT"] = "test-commit"
         if password is not None:
             environment["POSTGRES_PASSWORD"] = password
@@ -33,8 +36,11 @@ class ComposeConfigurationTests(unittest.TestCase):
             env_file = Path(directory) / "empty.env"
             env_file.write_text("")
             result = subprocess.run(
-                ["docker", "compose", "--env-file", str(env_file), "-f", str(ROOT / "compose.yaml"),
-                 "config", "--format", "json"],
+                [
+                    "docker", "compose", "--env-file", str(env_file),
+                    "-f", str(ROOT / "compose.yaml"), "--profile", "observability",
+                    "config", "--format", "json",
+                ],
                 capture_output=True, text=True, env=environment, timeout=30,
             )
         self.assertEqual(result.returncode, 0, "Compose configuration could not be rendered")
@@ -53,7 +59,7 @@ class ComposeConfigurationTests(unittest.TestCase):
 
     def test_backend_has_only_approved_runtime_environment(self):
         """The API receives no PostgreSQL initializer or future provider settings."""
-        backend = self.render()["backend"]
+        backend = self.render(backend_database_url=VALID_BACKEND_URL)["backend"]
         self.assertEqual(
             set(backend["environment"]),
             {"DATABASE_URL", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_SDK_DISABLED"},
@@ -67,7 +73,7 @@ class ComposeConfigurationTests(unittest.TestCase):
 
     def test_backend_is_loopback_only_and_waits_for_healthy_postgres(self):
         """Compose ordering and exposure match the approved local boundary."""
-        backend = self.render()["backend"]
+        backend = self.render(backend_database_url=VALID_BACKEND_URL)["backend"]
         self.assertEqual(backend["ports"][0]["host_ip"], "127.0.0.1")
         self.assertEqual(
             backend["depends_on"]["postgres"]["condition"], "service_healthy"
@@ -79,7 +85,7 @@ class ComposeConfigurationTests(unittest.TestCase):
 
     def test_backend_runtime_is_hardened_and_has_no_mounts(self):
         """The baseline is non-root, immutable and narrowly writable."""
-        backend = self.render()["backend"]
+        backend = self.render(backend_database_url=VALID_BACKEND_URL)["backend"]
         self.assertEqual(backend["user"], "10001:10001")
         self.assertTrue(backend["read_only"])
         self.assertEqual(backend["cap_drop"], ["ALL"])
@@ -94,7 +100,7 @@ class ComposeConfigurationTests(unittest.TestCase):
 
     def test_backend_build_uses_narrow_context_and_commit_tag(self):
         """Image provenance and build input stay local to the backend allowlist."""
-        backend = self.render()["backend"]
+        backend = self.render(backend_database_url=VALID_BACKEND_URL)["backend"]
         self.assertEqual(Path(backend["build"]["context"]), ROOT / "backend")
         self.assertEqual(backend["build"]["args"]["SOURCE_COMMIT"], "test-commit")
         self.assertEqual(backend["image"], "unshaken-backend:test-commit")
@@ -118,6 +124,14 @@ class ComposeConfigurationTests(unittest.TestCase):
             },
         )
 
+    def test_unrelated_model_works_with_backend_url_absent_or_empty(self):
+        """PostgreSQL and observability configuration never requires backend setup."""
+        for value in (_UNSET, ""):
+            services = self.render(backend_database_url=value)
+            self.assertIn("postgres", services)
+            self.assertIn("alloy", services)
+            self.assertEqual(services["backend"]["environment"]["DATABASE_URL"], "")
+
     def test_dockerfile_pins_inputs_and_starts_only_uvicorn(self):
         """The image is locked, explicitly copied, and never migrates on startup."""
         dockerfile = (ROOT / "backend" / "Dockerfile").read_text()
@@ -125,6 +139,10 @@ class ComposeConfigurationTests(unittest.TestCase):
         self.assertIn("ghcr.io/astral-sh/uv:0.13.7@sha256:", dockerfile)
         self.assertNotIn("COPY .", dockerfile)
         self.assertNotIn("ADD ", dockerfile)
+        self.assertIn(
+            'ENTRYPOINT ["python", "-m", "app.container_entrypoint"]',
+            dockerfile,
+        )
         self.assertIn('CMD ["uvicorn", "app.main:app"', dockerfile)
         command = dockerfile.rsplit("CMD ", 1)[1]
         self.assertNotIn("alembic", command)

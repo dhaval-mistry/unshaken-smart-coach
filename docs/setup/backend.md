@@ -175,6 +175,10 @@ settings, set `BACKEND_CONTAINER_DATABASE_URL` to the same empty/local database
 using Compose hostname `postgres` and container port `5432`. Percent-encode
 reserved credential characters. Do not print the URL or use a loopback hostname
 inside the container. The safe `.env.example` shows the required shape.
+Compose configuration and PostgreSQL/observability-only commands remain usable
+when this setting is absent. Starting the backend or its one-off migration CLI
+fails with a fixed, nonsecret error until the value names `postgres:5432` and
+contains concrete, non-placeholder database credentials and database name.
 
 From the repository root, validate configuration without rendering private
 values, then build and start PostgreSQL and the API:

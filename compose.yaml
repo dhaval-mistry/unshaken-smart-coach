@@ -20,7 +20,10 @@ services:
     mem_limit: 512m
     stop_grace_period: 10s
     environment:
-      DATABASE_URL: ${BACKEND_CONTAINER_DATABASE_URL:?set a private container URL}
+      # Keep the model usable for postgres/observability-only commands. The
+      # backend image rejects an absent, placeholder, or non-private URL before
+      # executing Uvicorn or a one-off database command.
+      DATABASE_URL: ${BACKEND_CONTAINER_DATABASE_URL:-}
       OTEL_SDK_DISABLED: ${BACKEND_CONTAINER_OTEL_SDK_DISABLED:-true}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${BACKEND_CONTAINER_OTEL_ENDPOINT:-http://alloy:4318}
     ports:

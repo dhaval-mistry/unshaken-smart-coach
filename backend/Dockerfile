@@ -44,4 +44,5 @@ EXPOSE 8000
 
 # Uvicorn is the only startup action. Database planning and upgrades remain
 # explicit one-off `unshaken-db` commands run from this same image.
+ENTRYPOINT ["python", "-m", "app.container_entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
