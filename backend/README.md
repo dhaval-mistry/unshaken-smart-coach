@@ -1,7 +1,7 @@
 # Backend
 
-The local database foundation now uses Python 3.12, uv, SQLAlchemy Core,
-Psycopg 3, and Alembic. There is no FastAPI application or application API yet.
+The backend uses Python 3.12, FastAPI, uv, SQLAlchemy Core, Psycopg 3, and
+Alembic. It can run on the host or in the hardened local Compose container.
 
 - `app/db/schema.py`: the 13-table metadata.
 - `app/db/config.py`: existing private root DATABASE_URL settings.
@@ -11,6 +11,7 @@ Psycopg 3, and Alembic. There is no FastAPI application or application API yet.
 - `tests/`: database integration checks and shared telemetry unit tests.
 - `app/telemetry/`: opt-in shared logs, metrics and spans for future API and script callers.
 - `examples/`: [synthetic API and script examples](examples/README.md), with no database changes.
+- `Dockerfile`: locked multi-stage API/migration image with a non-root runtime.
 
 Follow [backend setup](../docs/setup/backend.md) and the
 [database design](../docs/database/design.md). Reuse `app/telemetry/` for API
@@ -35,9 +36,9 @@ finally:
     shutdown()
 ```
 
-A future FastAPI application should call the same initialization and shutdown
-functions once in its application lifespan and use the same helpers in handlers.
-The API itself is not implemented here.
+The FastAPI application calls the same initialization and shutdown functions
+once in its lifespan. Its current HTTP surface is liveness and generated API
+documentation; product endpoints remain separate work.
 
 Supported event names are `operation.started`, `operation.completed` and
 `operation.failed`. Supported operations are `database`, `lookup`, `request`,

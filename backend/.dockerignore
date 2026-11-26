@@ -1,0 +1,12 @@
+# Deny by default so new local files, credentials, tests and build output cannot
+# silently enter the image build context. Keep this allowlist synchronized with
+# the Dockerfile's explicit COPY instructions.
+**
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!app/
+!app/**
+!migrations/
+!migrations/**
