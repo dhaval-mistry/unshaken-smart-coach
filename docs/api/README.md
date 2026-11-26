@@ -1,11 +1,13 @@
 # API design and review map
 
-**Review status: mixed.** Confirmed product decisions and the issue #30 D1/D2
-constraints are approved; new API paths, payloads and later-story decisions
-remain proposals until accepted. The owner explicitly approved D1/D2 in the
-Solution Architect follow-up on 2026-11-11, closing #30's remaining architecture
-gates. Issue #30 can be marked Ready for a separately requested Developer. This
-document does not assign work, implement a migration or authorize applying one.
+**Review status: mixed.** Confirmed product decisions, issue #30 D1/D2 and
+#13's bounded synchronous database direction/error mapping are approved; new
+API paths, payloads and later-story decisions remain proposals until accepted.
+The owner explicitly approved D1/D2 in the Solution Architect follow-up on
+2026-11-11 and the #13 decisions in the Solution Architect follow-up on
+2026-11-25. #13's approval does not approve PR #40 as-is, claim the endpoint is
+implemented on `main`, mark the issue Ready or authorize a merge. This document
+does not assign work, implement a migration or authorize applying one.
 
 **Implemented baseline:** application code through `a4cafb8` has the FastAPI
 application, shared JSON errors/headers, `GET /health/live`, shared telemetry
@@ -48,7 +50,7 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 | Issue | Design section | Database effect and gate |
 |---|---|---|
 | [#13](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/13) readiness | [Check the running backend](foundation.md#check-the-running-backend), [deadline and cleanup](foundation.md#database-deadlines-and-connection-ownership) | Existing lookup reads; no #30 dependency |
-| [#14](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/14) form choices | [Load choices](foundation.md#load-choices-for-the-new-exercise-form) | Existing ordered active lookup reads; after #13 |
+| [#14](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/14) form choices | [Load choices](foundation.md#load-choices-for-the-new-exercise-form) | Existing ordered active lookup reads; after #13; total deadline remains owner-gated |
 | [#15](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/15) real API signals | [Logs, metrics and traces](foundation.md#logs-metrics-and-traces) | Instrument real reads; no application-table writes/new stack |
 | [#21](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/21) search/select provider exercise | [Search and provider selection](exercises.md#search-and-provider-selection) | Reads, plus conditional provider-catalog writes; auth and provider terms gate |
 | [#22](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/22) custom exercise | [Create a private custom exercise](exercises.md#create-a-private-custom-exercise) | Existing exercise/custom rows using #30 effective-kind field; auth gate |
@@ -63,6 +65,15 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 
 ## Approved decisions retained
 
+- #13 retains synchronous SQLAlchemy Core/Psycopg behind one shared, explicitly
+  bounded pool and executor owned by FastAPI lifespan. It uses supported
+  cross-platform cancellation rather than raw socket-descriptor manipulation,
+  enforces one three-second total deadline with cleanup/response headroom, and
+  requires safe invalidation/release, bounded shutdown and allowlisted logging.
+- #13 maps invalid URL, authentication/connectivity, missing read permission,
+  pool wait and query timeout to `503 database_unavailable`; missing lookup
+  tables or active rows to `503 reference_data_unavailable`; and incompatible
+  schema, SQL/programming or unexpected failures to `500 internal_error`.
 - Each saved template has at least one exercise; **each included exercise has
   at least one valid set**, both on creation and later updates. The owner
   explicitly resolved the zero-set question in the owner-decision section of
@@ -96,6 +107,10 @@ D1/D2 approval makes #30 ready for separate implementation; it does not answer
 D3–D9 or authorize their affected API behavior.
 
 Public #13 → #14 → #15 can proceed independently of #30 and private sign-in.
+#13 still requires issue/PR alignment, corrected implementation and verification;
+its architecture approval alone does not make PR #40 merge-ready. #14 may reuse
+the shared infrastructure, but its total deadline remains a later owner decision
+that does not block #13.
 Issue #30 now has approved architecture and precedes effective-kind/template/
 cancellation APIs; implementation still requires a separately requested role.
 Verified identity is a prerequisite for every private route; its session/account
