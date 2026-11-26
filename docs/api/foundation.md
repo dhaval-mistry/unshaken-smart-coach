@@ -1,8 +1,10 @@
 # Initial API design
 
-Design status: **proposed architecture for review**, retaining the product and
-HTTP requirements already recorded in issues #12–15. New technical mechanisms
-and private-route contracts require review; existing approvals are not reopened.
+Design status: **mixed**. The product and HTTP requirements in issues #12–15
+remain authoritative. The owner approved #13's bounded synchronous database
+execution direction and error classification in the Solution Architect
+follow-up on 2026-11-25. #14's total deadline, private-route contracts and other
+later-story mechanisms remain proposals; existing approvals are not reopened.
 
 Implementation status: **Partially implemented**. The FastAPI application,
 shared response and error behavior, and `GET /health/live` exist (issue #12).
@@ -114,9 +116,13 @@ Validate declared fields/types/bounds and reject unknown fields before use.
 Use decimal representations for exact numeric values and ISO-8601 UTC event
 timestamps. Domain conflict/validation codes in the exercise/workout designs
 are proposals using the same safe envelope. Do not echo rejected values in
-responses/logs or expose generated driver exceptions. Expected connection/
-deadline failure maps to `503 database_unavailable`; programming failures stay
-`500 internal_error`, without mislabelling every failure a database outage.
+responses/logs or expose generated driver exceptions. For #13, invalid database
+configuration, authentication/connectivity failure, missing read permission,
+pool wait and query timeout map to `503 database_unavailable`. A missing lookup
+table or no active lookup rows maps to `503 reference_data_unavailable`. An
+incompatible schema such as a missing `is_active` column, SQL/programming defect
+or unexpected application failure maps to `500 internal_error`. Do not mislabel
+every failure as a database outage.
 
 No private route becomes ready just because its schema exists. Link an approved
 authentication story before implementing private scope, without implementing
@@ -141,9 +147,9 @@ Example of a database outage response (`503`):
 | `422` | `invalid_request` | Unsupported query parameter or nonempty request body |
 | `404` | `not_found` | No such API route |
 | `405` | `method_not_allowed` | Unsupported method; preserve the HTTP `Allow` header |
-| `503` | `database_unavailable` | Connection or read timed out, or PostgreSQL is unavailable |
+| `503` | `database_unavailable` | Invalid database URL, authentication/connectivity or read-permission failure, pool wait or query timeout |
 | `503` | `reference_data_unavailable` | Required lookup table is absent or the requested active list is empty |
-| `500` | `internal_error` | Unexpected application failure |
+| `500` | `internal_error` | Incompatible schema, SQL/programming defect or unexpected application failure |
 
 Use the same envelope for errors on these routes and routing errors. Return a
 short safe message, never SQL, host details, connection strings, stack traces,
@@ -191,16 +197,22 @@ services, Alloy, Grafana, Loki, Mimir, or Tempo.
 
 ### Database deadlines and connection ownership
 
-**Technical proposal for #13/#14:** own one bounded database engine/pool per
-application process using the existing SQLAlchemy/Psycopg/root-environment
-boundary. Construct it lazily or in lifespan without requiring a successful
-database connection to serve liveness. Do not construct a pool per request.
-Migration/script processes retain their own isolated lifecycle; API requests
-do not run migration commands. Dispose the application pool at shutdown.
+**Approved technical direction for #13:** retain synchronous SQLAlchemy Core and
+Psycopg. Own one explicitly bounded database engine/pool and one explicitly
+bounded worker executor per application process. FastAPI lifespan owns their
+startup and bounded shutdown. Construct them lazily or in lifespan without
+requiring a successful database connection to serve liveness; do not construct
+either per request. Migration/script processes retain their isolated lifecycle,
+and API requests never run migration commands, create tables, seed or repair
+data. Shutdown stops new submissions, handles queued/active work within the
+defined bound, then disposes the application pool without exposing secrets.
 
-Measure one monotonic deadline from request check start. The three-second #13
-budget includes pool wait, physical connect, lock/read statements and response
-decision, not three seconds for each stage. Allocate only the remaining budget.
+Measure one monotonic deadline from request-check start. The three-second #13
+budget includes executor queue, pool wait, physical connect, lock/read statements,
+cleanup and response decision, not three seconds for each stage. Reserve enough
+headroom for cancellation/cleanup and the HTTP response. Allocate only the
+remaining budget, and do not let work whose budget has expired begin pool
+checkout.
 Use short read-only queries (existence of one active row each), not a scan of
 all schema/seed values. A missing table/empty list is reference-data unavailable;
 a dead/slow connection is database unavailable. Release/rollback every acquired
@@ -209,19 +221,27 @@ connection if driver cancellation leaves its state uncertain.
 
 The current synchronous `database_engine()` helper has a five-second connect
 timeout and does not itself establish this request-wide API deadline. It must
-not be advertised as meeting #13 unchanged. Proposed implementation direction:
-use a cancellation-aware pool/driver execution boundary, keeping SQLAlchemy
-Core and Psycopg rather than adding an unrelated database stack. If async access
-is selected, reuse one process-scoped async pool and existing settings; if sync
-execution is retained, bound worker concurrency and prove the underlying driver
-operation stops/releases on timeout. Cancelling only an awaiting thread task is
-insufficient when its database operation continues holding a connection.
+not be advertised as meeting #13 unchanged. Use supported, cross-platform
+Psycopg cancellation through the bounded synchronous boundary; do not manipulate
+raw operating-system socket descriptors such as with `os.dup`. Cancelling only
+an awaiting thread task is insufficient when its database operation continues
+holding a connection. Cancellation must safely interrupt or bound the applicable
+phase, and uncertain connections must be invalidated rather than returned to the
+pool. Do not claim the chosen driver mechanism interrupts executor queue, pool
+wait, connect and read unless tests demonstrate each phase; combine supported
+driver cancellation with phase-specific timeouts and remaining-budget checks.
 
-The final implementation plan must select/test its concrete driver/pool strategy
-against pool exhaustion, slow connection, slow read and client cancellation.
-#14 should reuse that boundary and a proposed three-second total read deadline,
-without silently extending #13's readiness budget. Timings and pool-release
-evidence are acceptance gates, not claims proved by this document.
+Implementation evidence must cover executor and pool exhaustion, slow connection,
+slow read, client cancellation, invalidation/recovery and bounded shutdown on
+supported platforms. It must distinguish simulated from live evidence. This
+approval defines required behavior; it does not prove an unverified cancellation
+capability or approve PR #40 as-is. If no supported mechanism satisfies the
+deadline and cleanup contract, implementation stops and reports the gap instead
+of substituting raw socket handling or weakening acceptance.
+
+#14 should reuse the shared pool/executor/cancellation infrastructure, but its
+total request deadline remains a proposal for that later story. That open #14
+choice does not block #13 and must not silently extend #13's readiness budget.
 
 ## Load choices for the New exercise form
 
@@ -334,9 +354,9 @@ converted metric names/units/labels in Mimir and links from Loki to Tempo.
 
 Safe logging is also a #13 acceptance requirement and cannot wait for #15's
 store-delivery work. The shared allowlisted event helper does not sanitize every
-Uvicorn/driver logger. Proposed boundary: explicitly configure server and
-application exception logging to omit raw exception messages, SQL/parameters,
-connection URLs and inputs; retain safe failure category, request ID and
+Uvicorn/driver logger. For #13, explicitly configure server and application
+exception logging to omit raw exception messages, SQL/parameters, connection
+URLs and inputs; retain only an allowlisted failure category, request ID and
 reviewed diagnostic metadata. Do not attach raw `exc_info` to exported records.
 Test captured process/server logs with synthetic sensitive exception text,
 including when telemetry is disabled. Do not globally hide all errors as a
@@ -373,10 +393,18 @@ Record exact commands, commit, results, and limitations in the implementation PR
 
 ## Decisions for review and Product Owner handoff
 
-Human review is needed on the new technical execution, private identity and
-safe logging proposals. Public no-sign-in health/lookup behavior, exact shared
-response requirements and #13's three-second total deadline are already stated
-in their stories; do not reopen them as missing product choices.
+The owner approved #13's corrected bounded synchronous SQLAlchemy/Psycopg
+direction and the error mapping in the Solution Architect conversation on
+2026-11-25. This records architecture approval only: it does not approve PR #40
+as-is, claim implementation on `main`, mark issue #13 Ready or authorize a merge.
+Implementation must still provide the evidence above and receive the applicable
+review. Public no-sign-in behavior, exact shared responses and #13's three-second
+total deadline were already stated in the story; do not reopen them.
+
+Human review is still needed for private identity and other later-story
+proposals. #14's total deadline remains owner-gated, while reuse of the shared
+bounded infrastructure is the ordinary engineering direction and does not block
+#13.
 
 Keep the database's remaining decisions in its
 [decision list](../database/design.md#remaining-future-decisions-and-review-boundary).
