@@ -6,9 +6,11 @@ They never accept the shared/development database.
 
 import asyncio
 import os
+import time
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.engine import URL
 
 from app.db.config import database_engine, database_url
 from app.db.readiness import DatabaseReadiness, ReadinessState
@@ -41,6 +43,10 @@ def check(disposable_url):
         resources.shutdown()
 
 
+def check_resource(resources):
+    return asyncio.run(resources.check())
+
+
 def test_live_seeded_data_is_ready(engine, disposable_url):
     with engine.begin() as connection:
         category_count = connection.execute(
@@ -55,9 +61,13 @@ def test_live_seeded_data_is_ready(engine, disposable_url):
 
 
 def test_live_repeated_reads_reuse_pool_without_exhaustion(engine, disposable_url):
-    del engine
-    for _ in range(10):
-        assert check(disposable_url).state == ReadinessState.READY
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        for _ in range(10):
+            assert check_resource(resources).state == ReadinessState.READY
+        assert resources._engine.pool.checkedout() == 0
+    finally:
+        resources.shutdown()
 
 
 def test_live_empty_active_list_is_reference_unavailable(engine, disposable_url):
@@ -117,3 +127,80 @@ def test_live_lock_timeout_is_database_unavailable(engine, disposable_url):
     finally:
         holder.exec_driver_sql("ROLLBACK")
         holder.close()
+
+
+def test_live_invalid_password_is_database_unavailable(disposable_url):
+    invalid_url = disposable_url.set(
+        password="intentional-wrong-password-usc-test"
+    )
+    resources = DatabaseReadiness(invalid_url)
+    try:
+        result = check_resource(resources)
+        assert result.state == ReadinessState.DATABASE_UNAVAILABLE
+        assert result.elapsed_seconds < 3.0
+    finally:
+        resources.shutdown()
+
+
+def test_live_missing_permission_is_database_unavailable(engine, disposable_url):
+    role = "usc_readiness_no_select"
+    with engine.begin() as connection:
+        connection.execute(sa.text(f'DROP ROLE IF EXISTS "{role}"'))
+        connection.execute(sa.text(f'CREATE ROLE "{role}" LOGIN PASSWORD \'usc-test-password\''))
+
+    limited_url = URL.create(
+        "postgresql+psycopg",
+        username=role,
+        password="usc-test-password",
+        host=disposable_url.host,
+        port=disposable_url.port,
+        database=disposable_url.database,
+    )
+    resources = DatabaseReadiness(limited_url)
+    try:
+        result = check_resource(resources)
+        assert result.state == ReadinessState.DATABASE_UNAVAILABLE
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(f'DROP ROLE IF EXISTS "{role}"'))
+
+
+def test_live_pool_exhaustion_is_database_unavailable(disposable_url):
+    resources = DatabaseReadiness(disposable_url)
+    held = []
+    try:
+        held.append(resources._engine.connect())
+        held.append(resources._engine.connect())
+        started = time.monotonic()
+        result = check_resource(resources)
+        elapsed = time.monotonic() - started
+        assert result.state == ReadinessState.DATABASE_UNAVAILABLE
+        assert elapsed < 3.0
+        for connection in held:
+            connection.close()
+        held.clear()
+        assert check_resource(resources).state == ReadinessState.READY
+    finally:
+        for connection in held:
+            connection.close()
+        resources.shutdown()
+
+
+def test_live_refused_connect_is_database_unavailable(disposable_url):
+    refused_url = URL.create(
+        "postgresql+psycopg",
+        username="nobody",
+        password="wrong",
+        host="127.0.0.1",
+        port=1,
+        database=disposable_url.database,
+    )
+    resources = DatabaseReadiness(refused_url)
+    try:
+        started = time.monotonic()
+        result = check_resource(resources)
+        assert result.state == ReadinessState.DATABASE_UNAVAILABLE
+        assert time.monotonic() - started < 3.0
+    finally:
+        resources.shutdown()

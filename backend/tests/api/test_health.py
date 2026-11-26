@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 from uuid import UUID
+import logging
 
 import pytest
 from fastapi.testclient import TestClient
@@ -255,6 +256,43 @@ def test_ready_contract_accepts_no_extra_input(client, monkeypatch):
         422,
         "invalid_request",
     )
+
+
+def test_ready_uses_real_resource_without_database(client):
+    """Route integration uses DatabaseReadiness itself, not a fake outcome."""
+    from app.db.readiness import DatabaseReadiness
+
+    resources = DatabaseReadiness(None)
+    client.app.state.database_readiness = resources
+    response = client.get("/health/ready")
+    assert_error(response, 503, "database_unavailable")
+    assert "postgresql://" not in response.text
+    assert "password" not in response.text.lower()
+
+
+def test_readiness_log_contains_no_database_exception_secret(caplog):
+    """State logs allow only readiness state and request correlation."""
+    from app.db.readiness import DatabaseReadiness
+
+    resources = DatabaseReadiness(None)
+    with caplog.at_level(logging.INFO, logger="app.database_readiness"):
+        resources.record_state(
+            ReadinessResult(
+                ReadinessState.DATABASE_UNAVAILABLE,
+                0.01,
+            ),
+            "00000000-0000-0000-0000-000000000001",
+        )
+    text = "\n".join(
+        f"{record.getMessage()} "
+        f"{getattr(record, 'readiness_state', '')} "
+        f"{getattr(record, 'request_id', '')}"
+        for record in caplog.records
+    )
+    assert "database_unavailable" in text
+    assert "postgresql://" not in text
+    assert "hunter2" not in text
+    assert "secret@" not in text
 
 
 def test_openapi_documents_exact_readiness_response(client):
