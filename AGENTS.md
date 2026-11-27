@@ -29,3 +29,17 @@ Use existing permissions only. Never expose credentials or personal data,
 merge, deploy, delete data, or migrate an existing/shared database without
 separate human authorization. Respect unresolved decisions in
 `docs/database/design.md` when that file is present.
+
+## Token and Resource Efficiency
+
+- Read only files relevant to the assigned task.
+- Avoid repeated repository-wide analysis.
+- Reuse existing architecture and design documents.
+- Do not delegate unnecessarily to other agents.
+- Run targeted tests during development.
+- Run full regression tests before merging.
+- Keep explanations concise.
+- Do not modify unrelated files.
+- Escalate complex issues instead of repeatedly attempting unsuccessful fixes.
+- Maintain `TASK_STATE.md` at each completed milestone for cross-agent and
+  cross-platform handover.
