@@ -25,8 +25,9 @@ The owner-decision section of the
 is the recorded source for the later minimum-one-set approval. Retaining that
 human decision does not accept the closed pull request's code, migration, or
 reported validation. Open issues #23, #24, #25 and #30 now record the resolved
-minimum-one-set rule. D1/D2 are now approved #30 constraints; D3–D9 remain
-separate later-story gates.
+minimum-one-set rule. D1/D2 are approved #30 constraints. The owner also approved
+D8's [authentication design](../architecture/authentication.md) on 2026-11-26;
+it is not implemented. D3–D7 and D9 remain separate later-story gates.
 
 Related work: [finalize design #2](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/2),
 [versioned tables #3](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/3),
@@ -39,7 +40,8 @@ and the verified-command/status section in [backend setup](../setup/backend.md).
 
 Retain the previously confirmed requirements:
 
-- Google/Microsoft sign-in; authentication implementation is separate work.
+- Google/Apple sign-in, selected by the owner on 2026-11-26 in place of Microsoft;
+  authentication implementation is separate work.
 - Personal and shared sample templates, ordered exercises, and ordered sets.
 - Provider exercises plus only the current user's private custom exercises.
   Shared samples cannot reference private custom exercises.
@@ -376,7 +378,7 @@ Contact email is not globally unique. Authentication resolves user_identities, n
 |---|---|---|
 | id | UUID | Primary key. |
 | user_id | UUID | Required FK users. |
-| provider | VARCHAR(20) | Required; google or microsoft. |
+| provider | VARCHAR(20) | Required. Current frozen schema permits google/microsoft; selected target is google/apple through a reviewed successor migration. |
 | issuer | TEXT | Required; validated OIDC issuer. |
 | subject | TEXT | Required; validated subject within issuer. |
 | email_at_login | VARCHAR(320) | Nullable. |
@@ -384,7 +386,7 @@ Contact email is not globally unique. Authentication resolves user_identities, n
 | last_login_at | TIMESTAMPTZ | Nullable. |
 | created_at | TIMESTAMPTZ | Required; server creation timestamp. |
 
-Unique (provider, issuer, subject). Never store provider passwords or automatically link accounts by email. Provider-token validation and application sessions/refresh-token persistence are separate authentication work.
+Unique (provider, issuer, subject). Never store provider passwords or automatically link accounts by email. The owner-approved [authentication design](../architecture/authentication.md) defines verification, application sessions and encrypted Apple credential storage (2026-11-26). It requires a separate successor migration; do not edit frozen migrations or silently delete existing Microsoft identity rows. New auth storage does not change workout ownership/history rules or the current ER diagram's implemented tables.
 
 ### exercise_categories
 
@@ -897,8 +899,11 @@ keeping them outside the physical foundation rather than inventing behavior:
    and late-finish behavior.
 4. ExerciseDB version, payload mapping, caching/media terms and sync operations.
 5. Timer adjustment, skip, undo, pause/resume.
-6. Account linking/application-session storage, onboarding unit default,
-   sample administration, account erasure.
+6. Account linking/application-session storage and explicit first-login name/unit
+   collection are approved in [authentication](../architecture/authentication.md)
+   on 2026-11-26; implementation needs a separate story/migration. No onboarding
+   unit default is added. Sample administration, unlinking, recovery, merging,
+   account erasure and legacy Microsoft-only transition remain separate decisions.
 7. In-workout exercise removal/reordering beyond the specific unperformed-set
    operation remains undecided. The owner has resolved saved-template completeness:
    at least one exercise and at least one valid set per included exercise;
@@ -912,8 +917,9 @@ The [API owner-decision table](../api/workouts.md#owner-decisions-and-approval-c
 collects remaining cross-story choices and explicitly labelled recommendations.
 The #30 privileged-discard capability and conservative live-kind edit policy
 above are approved constraints. They close #30's architecture gates, so #30 can
-be marked Ready for a separately requested Developer. D3–D9 remain later-story
-gates and are not silently approved by #30 readiness.
+be marked Ready for a separately requested Developer. D3–D7 and D9 remain
+later-story gates. D8 was separately approved on 2026-11-26 and still needs
+implementation; none of these decisions is implied by #30 readiness.
 
 No API implementing those behaviors is included in #3/#4. The newly approved
 changes require a new migration and planned API work; they are not present in

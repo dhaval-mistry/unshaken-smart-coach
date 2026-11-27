@@ -22,8 +22,8 @@ categories retain their approved kind. Weight is not required to define an
 exercise. Effective exercise kinds require the planned #30 migration; current
 main has only category kinds and captured session kinds.
 
-#14 supplies existing choices. Private routes wait for a separately approved,
-implemented Google/Microsoft identity boundary; client-supplied user IDs never
+#14 supplies existing choices. Private routes wait for implementation of the
+approved Google/Apple [identity boundary](../architecture/authentication.md); client-supplied user IDs never
 select an owner. #21 provider persistence additionally waits for the rights
 record below. No custom edit/delete, account-linking, sample administration,
 bulk import or UI is added by these stories.

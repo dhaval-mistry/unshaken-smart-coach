@@ -1,7 +1,8 @@
 # API design and review map
 
 **Review status: mixed.** Confirmed product decisions, issue #30 D1/D2 and
-#13's bounded synchronous database direction/error mapping are approved; new
+#13's bounded synchronous database direction/error mapping and D8's
+Google/Apple authentication design are approved; other new
 API paths, payloads and later-story decisions remain proposals until accepted.
 The owner explicitly approved D1/D2 in the Solution Architect follow-up on
 2026-11-11 and the #13 decisions in the Solution Architect follow-up on
@@ -33,6 +34,7 @@ migration mechanism as approved.
 | Document | Owns |
 |---|---|
 | [Foundation](foundation.md) | Common HTTP/access rules, readiness, lookup reads, deadline/connection ownership and safe telemetry |
+| [Authentication](../architecture/authentication.md) | Approved Google/Apple login, browser sessions, linking and private-route identity prerequisite (D8); not implemented |
 | [Exercises](exercises.md) | Stored/live search, provider selection and retention gates, private custom creation |
 | [Workouts](workouts.md) | Template Save, start, completion, Finish choice, cancellation, history and previous performance |
 | [Database design](../database/design.md) | Physical representation, invariants, migration/rollback, privileged discard boundary and compatibility |
@@ -65,6 +67,10 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 
 ## Approved decisions retained
 
+- Google and Apple replace Google/Microsoft. The owner approved the complete
+  [authentication design](../architecture/authentication.md) on 2026-11-26:
+  direct backend login, eight-hour/30-minute-idle cookie sessions, explicit
+  name/unit onboarding and verified linking without automatic email merging.
 - #13 retains synchronous SQLAlchemy Core/Psycopg behind one shared, explicitly
   bounded pool and executor owned by FastAPI lifespan. It uses supported
   cross-platform cancellation rather than raw socket-descriptor manipulation,
@@ -104,7 +110,8 @@ issue status. All acceptance criteria must be verified in the implementation PR.
 Review the approved #30 constraints and remaining later-story decisions in the
 [owner decision table](workouts.md#owner-decisions-and-approval-checklist).
 D1/D2 approval makes #30 ready for separate implementation; it does not answer
-D3–D9 or authorize their affected API behavior.
+D3–D7/D9 or authorize their affected API behavior. D8's authentication design
+is now approved, but its implementation prerequisite remains unmet.
 
 Public #13 → #14 → #15 can proceed independently of #30 and private sign-in.
 #13 still requires issue/PR alignment, corrected implementation and verification;
@@ -113,8 +120,10 @@ the shared infrastructure, but its total deadline remains a later owner decision
 that does not block #13.
 Issue #30 now has approved architecture and precedes effective-kind/template/
 cancellation APIs; implementation still requires a separately requested role.
-Verified identity is a prerequisite for every private route; its session/account
-design and implementation require an approved authentication story. With that
+Verified identity is a prerequisite for every private route; the
+[approved authentication design](../architecture/authentication.md) must be
+implemented through a separate story. Existing #21–29 issue wording still
+needs Product Owner alignment from Microsoft to Apple. With that
 prerequisite, exercise choice/#22 and #23 lead to #24 → #25 → #26/#27 → #28 → #29.
 Provider persistence in #21 waits for verified rights, even if other APIs are ready.
 

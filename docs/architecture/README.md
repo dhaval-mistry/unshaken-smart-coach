@@ -9,6 +9,8 @@ lives in the repository's root README.
   single-process filesystem storage and application-only log collection are
   approved; the local stack and shared telemetry package are implemented.
 - [System overview](overview.md): planned components and folder responsibilities.
+- [Google/Apple authentication](authentication.md): owner-approved login, cookie
+  sessions, account linking, ownership and local setup; not implemented.
 - [Local backend container design](backend-container.md): owner-approved
   immutable Python 3.12 image, Compose service, configuration boundaries,
   explicit migrations and verification; not implemented.

@@ -14,13 +14,15 @@ records the later approval that every saved template exercise has at least one
 valid set on creation and update. PR #33 was closed without merge, so none of
 its implementation or test claims are accepted baseline behavior. Open issues
 #23, #24, #25 and #30 now record the approved minimum-set rule. The owner also
-approved D1/D2 in the Solution Architect follow-up on 2026-11-11; D3–D9 remain
-explicit later-story gates where applicable.
+approved D1/D2 on 2026-11-11 and D8's Google/Apple authentication design on
+2026-11-26. D3–D7 and D9 remain explicit later-story gates where applicable.
 
 Use [shared HTTP/access/deadline rules](foundation.md), the
 [exercise contracts](exercises.md) and [database design](../database/design.md).
 All examples use synthetic UUIDs. Every route below requires verified
-Google/Microsoft identity and owner checks; no request user ID grants access.
+Google/Apple identity and owner checks; no request user ID grants access.
+The [approved authentication design](../architecture/authentication.md) supplies
+D8's session/linking contract; the implementation prerequisite is still unmet.
 
 ## Approved workflow
 
@@ -394,8 +396,9 @@ authorize applying a migration.
 |---|---|
 | D1 / #30 discard | Install at most one narrowly scoped database operation for an explicitly confirmed, owner-matched `in_progress` draft. If it uses `SECURITY DEFINER`, fix the safe search path, schema-qualify dependencies, revoke PUBLIC in the migration transaction and keep execution with the migration/function owner until a separately approved least-privilege backend role exists. Caller IDs, Booleans, GUCs and `SET ROLE` never authenticate or bypass history protection. Foreign, unknown, unconfirmed and terminal targets remain unchanged; retained history is never deletable through this capability. |
 | D2 / #30, future catalog edit | Reject an effective-kind change while any saved live template references the exercise. Every live reference must first be explicitly removed or replaced through a complete valid template update; creating a new exercise is preferred. Never convert targets/units or rewrite captured sessions/history. A compatible change to an unreferenced exercise requires a separately authorized edit/admin workflow. This adds no edit API, provider remapping or Assisted Bodyweight rule. |
+| D8 / all private APIs | Owner approved the [Google/Apple authentication design](../architecture/authentication.md) on 2026-11-26: direct backend login, secure cookie sessions, explicit name/unit onboarding and verified linking without automatic email merging. Implementation/migration and provider setup remain prerequisites; unlinking, recovery, account merging and erasure are separate scope. |
 
-The following D3–D9 decisions remain **unapproved** merely by appearing as
+The following D3–D7 and D9 decisions remain **unapproved** merely by appearing as
 recommendations and do not block the bounded #30 migration when kept outside it.
 
 | ID / affected work | Required decision | Recommendation for review / alternative |
@@ -405,9 +408,8 @@ recommendations and do not block the bounded #30 migration when kept outside it.
 | D5 / #27 | JSON acknowledgement and repeat Discard response | JSON 200 acknowledgement; later absent row uses safe 404, no tombstone schema. Alternative durable idempotent replay requires reviewed storage/expiry. |
 | D6 / #28/#29 | History response bounds; repeated-exercise/set grouping, latest-result rule and partial inclusion | Review explicit bounded history pages and raw prior occurrences before adding matched suggestions; owner decides partial inclusion and matching semantics. |
 | D7 / #21 | Provider terms/mapping/retention, no-persistence selection and search bounds/ranking | Verify official rights first; block only affected persistence/selection when unsettled. No fabricated vendor limits or cache table. |
-| D8 / all private APIs | Approved Google/Microsoft identity/session/account-linking contract and story | Establish a separate auth prerequisite; no automatic email linking or caller-ID fallback. Choose bearer/session storage before private implementation. |
 | D9 / #26 | Normal Finish with pending sets | Reject unfinished sets; explicit completion/cancellation or a separately approved skip action is required. Alternative must preserve truthful history. |
 
-Owner review can approve D3–D9 independently while leaving other later-story
+Owner review can approve D3–D7 and D9 independently while leaving other later-story
 behavior gated. A separately requested Developer may implement only approved
 #30 scope; Code Reviewer/Tester roles and migrations are not invoked automatically.

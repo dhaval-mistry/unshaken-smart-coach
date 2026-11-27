@@ -3,7 +3,8 @@
 Design status: **mixed**. The product and HTTP requirements in issues #12–15
 remain authoritative. The owner approved #13's bounded synchronous database
 execution direction and error classification in the Solution Architect
-follow-up on 2026-11-25. #14's total deadline, private-route contracts and other
+follow-up on 2026-11-25. The Google/Apple authentication design was approved
+on 2026-11-26. #14's total deadline, other private-route contracts and
 later-story mechanisms remain proposals; existing approvals are not reopened.
 
 Implementation status: **Partially implemented**. The FastAPI application,
@@ -38,9 +39,10 @@ The other actions below show the next design steps, not approved API contracts.
 | Cancel an active workout | Warn that Discard deletes completed draft work; Save retains completed sets and cancels unfinished sets | Later; proposed contract and migration in [workouts.md](workouts.md) |
 | Review workout history and previous performance | Read the user's preserved workout records | Later; needs history matching and correction decisions |
 
-Google/Microsoft sign-in is a confirmed requirement, but token validation,
-application sessions, and account linking still need their own design. A
-user ID in a header, request body, or development setting is not authentication.
+The owner selected Google/Apple sign-in on 2026-11-26, replacing Microsoft.
+The [approved authentication design](../architecture/authentication.md) defines
+login, sessions, linking and local testing; these are not implemented.
+A user ID in a header, request body, or development setting is not authentication.
 Bodyweight may use duration instead of reps after a new database migration.
 The current migration still treats Bodyweight as reps only. These approved
 rules do not change the four initial, read-only endpoint contracts below.
@@ -93,24 +95,24 @@ not assumed to appear automatically from exception handlers.
 
 ### Private access and error boundary
 
-**Proposal for all #21–29 private routes:** validate Google/Microsoft issuer,
-signature, audience, expiry and stable subject at a separately approved identity
+**Approved identity boundary for #21–29 private routes:** validate Google/Apple issuer,
+signature, audience, expiry and stable subject at the shared identity
 boundary. Resolve that verified identity to the application's user; never use a
 submitted user ID, request ID, CORS origin, email alone or development header as
-proof. Account linking, bearer versus application-session transport, refresh/
-revocation and any additional session storage remain D8 in the
-[decision table](workouts.md#owner-decisions-and-approval-checklist). Existing
+proof. D8's approved cookie sessions, explicit linking, revocation and storage
+are collected in the [authentication design](../architecture/authentication.md);
+see the [decision table](workouts.md#owner-decisions-and-approval-checklist). Existing
 `users`/`user_identities` do not implement sign-in by themselves.
 
 The trusted service supplies the verified user to database operations; clients
 do not connect to PostgreSQL. Filter/lock by that owner in every private read
 and write, including child resources and bulk plan entries. Do not first reveal
-a foreign row and reject it afterward. Proposed error rule: unauthenticated
+a foreign row and reject it afterward. The approved error rule is: unauthenticated
 requests use `401 authentication_required`; unknown and inaccessible private
 IDs share `404 not_found` without revealing their existence. A request-supplied
 owner field is unsupported input, not a way to select a different identity.
-If cookie sessions are chosen, specify CSRF/origin protection as part of that
-auth design; CORS does not substitute for either authentication or CSRF control.
+Use the authentication design's cookie-session CSRF/origin protection;
+CORS does not substitute for either authentication or CSRF control.
 
 Validate declared fields/types/bounds and reject unknown fields before use.
 Use decimal representations for exact numeric values and ISO-8601 UTC event
@@ -401,8 +403,9 @@ Implementation must still provide the evidence above and receive the applicable
 review. Public no-sign-in behavior, exact shared responses and #13's three-second
 total deadline were already stated in the story; do not reopen them.
 
-Human review is still needed for private identity and other later-story
-proposals. #14's total deadline remains owner-gated, while reuse of the shared
+The owner approved D8's identity/session/linking design on 2026-11-26; its
+implementation is still a separate prerequisite. Human review remains needed
+for other later-story proposals. #14's total deadline remains owner-gated, while reuse of the shared
 bounded infrastructure is the ordinary engineering direction and does not block
 #13.
 
