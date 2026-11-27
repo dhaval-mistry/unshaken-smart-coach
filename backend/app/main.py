@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.errors import register_error_handlers
-from app.api.health import router as health_router
+from app.api.health import router as health_router, shutdown_database_readiness
 from app.api.middleware import request_context
 from app.telemetry import initialize, shutdown
 
@@ -26,7 +26,7 @@ Application-wide routing errors, which no single operation lists:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Own the shared telemetry lifecycle for this server process.
+    """Own shared database and telemetry resources for this server process.
 
     Telemetry is started once here, not at import time or per request, so a
     process never installs duplicate exporters. The shared helpers decide
@@ -36,10 +36,12 @@ async def lifespan(_app: FastAPI):
     most a few seconds to flush and reports, rather than raises, a failed
     flush. `finally` makes shutdown run even if serving stops with an error.
     """
+    _app.state.database_readiness = None
     initialize(service="unshaken-backend")
     try:
         yield
     finally:
+        shutdown_database_readiness(_app)
         shutdown()
 
 
