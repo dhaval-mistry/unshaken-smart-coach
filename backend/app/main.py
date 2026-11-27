@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.api.errors import register_error_handlers
 from app.api.health import router as health_router, shutdown_database_readiness
+from app.api.lookups import router as lookups_router
 from app.api.middleware import request_context
 from app.telemetry import initialize, shutdown
 
@@ -60,3 +61,4 @@ app = FastAPI(
 app.middleware("http")(request_context)
 register_error_handlers(app)
 app.include_router(health_router)
+app.include_router(lookups_router)

@@ -13,7 +13,10 @@ import sqlalchemy as sa
 from sqlalchemy.engine import URL
 
 from app.db.config import database_engine, database_url
-from app.db.readiness import DatabaseReadiness, ReadinessState
+from app.db.readiness import (
+    DatabaseReadiness,
+    ReadinessState,
+)
 
 
 @pytest.fixture(scope="module")
@@ -47,6 +50,10 @@ def check_resource(resources):
     return asyncio.run(resources.check())
 
 
+def lookup_resource(resources, table_name):
+    return asyncio.run(resources.lookup(table_name))
+
+
 def test_live_seeded_data_is_ready(engine, disposable_url):
     with engine.begin() as connection:
         category_count = connection.execute(
@@ -58,6 +65,92 @@ def test_live_seeded_data_is_ready(engine, disposable_url):
     assert category_count > 0
     assert body_count > 0
     assert check(disposable_url).state == ReadinessState.READY
+
+
+def test_live_lookup_lists_exact_initial_order_and_none(engine, disposable_url):
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        categories = lookup_resource(resources, "exercise_categories")
+        parts = lookup_resource(resources, "body_parts")
+        assert categories.state == ReadinessState.READY
+        assert parts.state == ReadinessState.READY
+        assert [item["name"] for item in categories.items] == [
+            "Barbell", "Dumbbell", "Machine/Other", "Bodyweight",
+            "Assisted Bodyweight", "Reps Only", "Cardio", "Duration",
+        ]
+        assert [item["name"] for item in parts.items] == [
+            "None", "Arms", "Back", "Cardio", "Chest", "Core",
+            "Full Body", "Legs", "Olympic", "Other", "Shoulders",
+        ]
+        assert all(type(item["id"]) is int for item in categories.items + parts.items)
+        assert all(type(item["sort_order"]) is int for item in categories.items + parts.items)
+        assert parts.items[0]["name"] == "None"
+    finally:
+        resources.shutdown()
+
+
+def test_live_lookup_omits_inactive_without_mutating_rows(engine, disposable_url):
+    with engine.begin() as connection:
+        before = connection.execute(sa.text(
+            "SELECT id, name, sort_order, is_active "
+            "FROM exercise_categories ORDER BY id"
+        )).mappings().all()
+        connection.execute(sa.text(
+            "UPDATE exercise_categories SET is_active = FALSE "
+            "WHERE name = 'Duration'"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        categories = lookup_resource(resources, "exercise_categories")
+        assert categories.state == ReadinessState.READY
+        assert "Duration" not in [item["name"] for item in categories.items]
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "UPDATE exercise_categories SET is_active = TRUE "
+                "WHERE name = 'Duration'"
+            ))
+            after = connection.execute(sa.text(
+                "SELECT id, name, sort_order, is_active "
+                "FROM exercise_categories ORDER BY id"
+            )).mappings().all()
+        assert [dict(row) for row in before] == [dict(row) for row in after]
+
+
+def test_live_lookup_empty_list_is_reference_unavailable(engine, disposable_url):
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "UPDATE body_parts SET is_active = FALSE"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        result = lookup_resource(resources, "body_parts")
+        assert result.state == ReadinessState.REFERENCE_DATA_UNAVAILABLE
+        assert result.items == ()
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "UPDATE body_parts SET is_active = TRUE"
+            ))
+
+
+def test_live_lookup_missing_table_is_reference_unavailable(engine, disposable_url):
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "ALTER TABLE body_parts RENAME TO body_parts_hold"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        result = lookup_resource(resources, "body_parts")
+        assert result.state == ReadinessState.REFERENCE_DATA_UNAVAILABLE
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "ALTER TABLE body_parts_hold RENAME TO body_parts"
+            ))
 
 
 def test_live_repeated_reads_reuse_pool_without_exhaustion(engine, disposable_url):
