@@ -139,7 +139,11 @@ def _callback(request: Request, provider: str, values: dict):
                 result = "session"
                 token = finish_link(connection, transaction, verified, runtime.settings)
             else:
-                result, token = finish_login(connection, verified, binding, runtime.settings)
+                result, token = finish_login(
+                    connection, verified, binding, runtime.settings, runtime.providers,
+                )
+        if result == "revoked":
+            raise AuthenticationFailed("Identity unavailable")
         response = RedirectResponse(runtime.settings.origin + transaction["return_path"], 303)
         if result == "session":
             _session_response(token, response)
@@ -189,13 +193,27 @@ async def apple_callback(request: Request):
 def read_session(request: Request):
     """Return the minimal session profile and CSRF proof."""
     token = request.cookies.get(SESSION_COOKIE)
-    onboarding = request.cookies.get(_ONBOARDING)
-    if not valid_token(token) and valid_token(onboarding):
-        return {"status": "onboarding_required", "csrf_token": csrf_token(onboarding, "onboarding")}
     profile = current_user(request)
     return {"display_name": profile["display_name"],
             "preferred_weight_unit": profile["preferred_weight_unit"],
             "csrf_token": csrf_token(token)}
+
+
+@router.get("/onboarding")
+def onboarding_csrf(request: Request):
+    """Give a browser-bound pending flow its own no-store CSRF token."""
+    from app.auth.flows import onboarding_pending
+
+    runtime = _runtime(request)
+    state = _opaque_cookie(request, _ONBOARDING)
+    binding = _opaque_cookie(request, _BINDING)
+    try:
+        with runtime.engine.connect() as connection:
+            if not onboarding_pending(connection, state, binding):
+                raise HTTPException(401)
+    except SQLAlchemyError:
+        return _database_failure(request)
+    return {"csrf_token": csrf_token(state, "onboarding")}
 
 
 @router.post("/onboarding")

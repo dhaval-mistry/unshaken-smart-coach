@@ -5,11 +5,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Connection
 
 from app.auth.encryption import (
-    decrypt_pending_token,
+    decrypt_pending_token, decrypt_refresh_token,
     encrypt_pending_token,
     encrypt_refresh_token,
 )
-from app.auth.providers import ExchangeResult
+from app.auth.providers import AppleRefreshRejected, ExchangeResult, Providers
 from app.auth.sessions import create_session, new_token, token_hash
 from app.auth.settings import AuthSettings
 from app.db.schema import (
@@ -87,7 +87,8 @@ def _store_apple(c: Connection, settings: AuthSettings, identity, refresh: bytes
     ))
 
 
-def finish_login(c: Connection, result: ExchangeResult, binding: str, settings: AuthSettings):
+def finish_login(c: Connection, result: ExchangeResult, binding: str,
+                 settings: AuthSettings, providers: Providers):
     """Issue a session to an existing identity or begin browser-bound onboarding."""
     identity = result.identity
     ids, user = user_identities.c, users.c
@@ -103,6 +104,21 @@ def finish_login(c: Connection, result: ExchangeResult, binding: str, settings: 
             raise AuthenticationFailed("Identity unavailable")
         if result.refresh_token is not None:
             _store_apple(c, settings, current["id"], result.refresh_token)
+        if identity.provider == "apple" and result.refresh_token is None:
+            stored = apple_revocation_credentials
+            credential = c.execute(sa.select(stored).where(
+                stored.c.identity_id == current["id"],
+            )).mappings().one_or_none()
+            if credential is not None:
+                token = decrypt_refresh_token(
+                    credential["ciphertext"], current["id"], credential["key_version"],
+                    settings.encryption_keys,
+                )
+                try:
+                    providers.refresh_apple(token)
+                except AppleRefreshRejected:
+                    revoke_apple_identity(c, identity.issuer, identity.subject)
+                    return "revoked", None
         c.execute(user_identities.update().where(ids.id == current["id"]).values(
             last_login_at=sa.func.clock_timestamp()))
         return "session", create_session(c, current["user_id"], current["id"])
@@ -189,6 +205,7 @@ def freshly_verified_owner(c: Connection, session_hash: bytes, provider: str):
                ids.provider != provider, ids.provider_revoked_at.is_(None),
                sessions.revoked_at.is_(None), sessions.created_at > now - FIVE_MINUTES,
                ids.last_login_at > now - FIVE_MINUTES)
+        .with_for_update(of=auth_sessions)
     ).scalar_one_or_none()
 
 
@@ -222,3 +239,13 @@ def finish_link(c: Connection, tx, result: ExchangeResult, settings: AuthSetting
         sessions.user_id == owner, sessions.revoked_at.is_(None),
     ).values(revoked_at=sa.func.clock_timestamp()))
     return create_session(c, owner, attached)
+
+
+def onboarding_pending(c: Connection, state: str, binding: str) -> bool:
+    """Check whether the browser still has a live verified onboarding flow."""
+    t = auth_transactions.c
+    return c.execute(sa.select(sa.exists().where(
+        t.state_hash == token_hash(state), t.binding_hash == token_hash(binding),
+        t.purpose == "onboarding", t.consumed_at.is_(None),
+        t.expires_at > sa.func.clock_timestamp(),
+    ))).scalar_one()

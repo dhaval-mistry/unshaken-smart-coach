@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -55,28 +56,32 @@ async def _periodic_cleanup(runtime: AuthRuntime) -> None:
 
 
 @asynccontextmanager
-async def authentication_runtime(app):
+async def _authentication_runtime(app):
     """Own authentication resources when private runtime settings exist."""
     app.state.authentication = None
     try:
         settings = load_auth_settings()
-        from app.db.config import database_engine
+        from app.db.config import database_url
 
-        engine = database_engine()
+        engine = create_engine(
+            database_url(),
+            hide_parameters=True,
+            pool_size=4,
+            max_overflow=0,
+            pool_timeout=2,
+            connect_args={"connect_timeout": 2,
+                          "options": "-c statement_timeout=5000 -c lock_timeout=2000"},
+        )
     except ValueError:
         yield
         return
 
     runtime = AuthRuntime(settings, engine, Providers(settings))
     app.state.authentication = runtime
-    access_log = logging.getLogger("uvicorn.access")
-    access_filter = AuthAccessFilter()
-    access_log.addFilter(access_filter)
     cleanup = asyncio.create_task(_periodic_cleanup(runtime))
     try:
         yield
     finally:
-        access_log.removeFilter(access_filter)
         cleanup.cancel()
         try:
             await cleanup
@@ -85,3 +90,16 @@ async def authentication_runtime(app):
         runtime.providers.close()
         engine.dispose()
         app.state.authentication = None
+
+
+@asynccontextmanager
+async def authentication_runtime(app):
+    """Suppress auth access lines even when provider settings are unavailable."""
+    access_log = logging.getLogger("uvicorn.access")
+    access_filter = AuthAccessFilter()
+    access_log.addFilter(access_filter)
+    try:
+        async with _authentication_runtime(app):
+            yield
+    finally:
+        access_log.removeFilter(access_filter)

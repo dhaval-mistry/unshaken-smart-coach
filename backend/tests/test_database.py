@@ -698,6 +698,7 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
         "synthetic-team", "synthetic-key", signing_key, "test.v1", {"test.v1": b"x" * 32},
     )
     flow = {}
+    include_refresh = True
 
     def exchange(request):
         """Serve a signed JWT and public keys at the fixed provider endpoints."""
@@ -705,6 +706,9 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
             return httpx.Response(200, json={"keys": [jwk]})
         data = parse_qs(request.content.decode())
         assert data["redirect_uri"] == [f"{origin}/api/v1/auth/{verified_provider}/callback"]
+        if data["grant_type"] == ["refresh_token"]:
+            assert data["refresh_token"] == [refresh]
+            return httpx.Response(200, json={"access_token": "discarded-test-access"})
         assert data["code"] == ["synthetic-code"]
         if verified_provider == "google":
             assert len(data["code_verifier"][0]) == 43
@@ -714,7 +718,7 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
                  iat=now, exp=now + timedelta(minutes=1)),
             issuer_key, algorithm="RS256", headers={"kid": "test-id"},
         )
-        return httpx.Response(200, json={"id_token": token, "refresh_token": refresh})
+        return httpx.Response(200, json={"id_token": token, "refresh_token": refresh if include_refresh else None})
 
     with httpx.Client(transport=httpx.MockTransport(exchange)) as transport:
         providers = Providers(settings, transport)
@@ -722,6 +726,17 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
             settings=settings, engine=engine, providers=providers,
         ), raising=False)
         browser = TestClient(app, base_url=origin, follow_redirects=False)
+        if provider == "apple":
+            include_refresh = False
+            initiated = browser.get("/api/v1/auth/apple/start")
+            flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
+            missing = browser.post("/api/v1/auth/apple/callback", data={
+                "state": flow["state"][0], "code": "synthetic-code",
+            })
+            assert missing.status_code == 401, missing.text
+            assert "fresh authorization" in missing.json()["error"]["message"]
+            assert "__Host-unshaken_onboarding" not in browser.cookies
+            include_refresh = True
         initiated = browser.get(f"/api/v1/auth/{provider}/start")
         assert initiated.status_code == 303
         flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
@@ -743,8 +758,8 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
                     .where(s.auth_transactions.c.verified_subject == subject)
                 ).scalar_one()
                 assert refresh.encode() not in pending
-        start = browser.get("/api/v1/auth/session").json()
-        assert start["status"] == "onboarding_required"
+        assert browser.get("/api/v1/auth/session").status_code == 401
+        start = browser.get("/api/v1/auth/onboarding").json()
         data = {"display_name": "Synthetic User", "preferred_weight_unit": "lb"}
         assert browser.post("/api/v1/auth/onboarding", json=data).status_code == 403
         onboarded = browser.post("/api/v1/auth/onboarding", json=data, headers={
@@ -792,6 +807,18 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
             current = browser.get("/api/v1/auth/session")
             assert current.status_code == 200, current.text
         else:
+            include_refresh = False
+            restarted = browser.get("/api/v1/auth/apple/start")
+            flow.update(parse_qs(urlsplit(restarted.headers["location"]).query))
+            again = browser.post("/api/v1/auth/apple/callback", data={
+                "state": flow["state"][0], "code": "synthetic-code",
+            })
+            assert again.status_code == 303, again.text
+            with engine.connect() as c:
+                retained = c.execute(sa.select(s.apple_revocation_credentials.c.ciphertext)
+                                     .where(s.apple_revocation_credentials.c.identity_id
+                                            == durable["identity_id"])).scalar_one()
+                assert retained == durable["ciphertext"]
             notification = jwt.encode(
                 dict(iss=issuers["apple"], aud="apple-fixture",
                      iat=datetime.now(timezone.utc), jti=str(uuid4()),

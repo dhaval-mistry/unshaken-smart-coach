@@ -1,5 +1,6 @@
 """Provider redirects and bounded backend requests to Google and Apple."""
 
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -24,6 +25,10 @@ _JWKS = {
     "apple": "https://appleid.apple.com/auth/keys",
 }
 _MAX_PROVIDER_BYTES = 64 * 1024
+
+
+class AppleRefreshRejected(ValueError):
+    """Apple returned a definitive invalid-refresh response."""
 
 
 class ProviderUnavailable(RuntimeError):
@@ -68,22 +73,28 @@ class Providers:
             params.update(scope="name email", response_mode="form_post")
         return f"{_AUTHORIZE[provider]}?{urlencode(params)}"
 
-    def _request(self, method: str, target: str, data=None) -> dict:
+    def _request(self, method: str, target: str, data=None, *, apple_refresh=False) -> dict:
         """Read a small JSON object from a fixed TLS endpoint."""
         try:
             with self.client.stream(method, target, data=data, follow_redirects=False) as response:
-                response.raise_for_status()
+                check_rejection = apple_refresh and response.status_code == 400
+                if not check_rejection:
+                    response.raise_for_status()
                 contents = bytearray()
                 for chunk in response.iter_bytes(chunk_size=8192):
                     contents.extend(chunk)
                     if len(contents) > _MAX_PROVIDER_BYTES:
                         raise ProviderUnavailable("Authentication provider unavailable")
-            import json
-
             result = json.loads(contents)
             if not isinstance(result, dict):
                 raise ValueError
+            if check_rejection:
+                if result.get("error") == "invalid_grant":
+                    raise AppleRefreshRejected("Apple refresh rejected")
+                raise ProviderUnavailable("Authentication provider unavailable")
             return result
+        except AppleRefreshRejected:
+            raise
         except (httpx.HTTPError, ValueError):
             raise ProviderUnavailable("Authentication provider unavailable") from None
 
@@ -136,3 +147,19 @@ class Providers:
         )
         refresh = result.get("refresh_token") if provider == "apple" else None
         return ExchangeResult(identity, refresh.encode() if isinstance(refresh, str) and refresh else None)
+
+
+    def refresh_apple(self, refresh_token: bytes) -> None:
+        """Verify a stored refresh credential and classify definitive invalidation."""
+        try:
+            refresh = refresh_token.decode()
+        except UnicodeError:
+            raise ProviderUnavailable("Authentication provider unavailable") from None
+        response = self._request("POST", _TOKEN["apple"], {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh,
+            "client_id": self.settings.apple_client_id,
+            "client_secret": self._apple_secret(),
+        }, apple_refresh=True)
+        if not isinstance(response.get("access_token"), str) or not response["access_token"]:
+            raise ProviderUnavailable("Authentication provider unavailable")

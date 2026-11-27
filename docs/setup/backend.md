@@ -448,7 +448,8 @@ Provider setup and exact registrations are tracked in #47. The registered
 Google and Apple callbacks under the same origin are
 `/api/v1/auth/google/callback` and `/api/v1/auth/apple/callback`. The
 application sends the browser to the fixed UI completion path
-`/auth/complete`. Keep proxy logs free of callback query strings and request
+`/auth/complete`. For first login, read the no-store CSRF token from
+`GET /api/v1/auth/onboarding` before submitting the profile. Keep proxy logs free of callback query strings and request
 bodies. The Docker command disables native access logs, and for direct local
 authentication testing use `uvicorn app.main:app --no-access-log`.
 
