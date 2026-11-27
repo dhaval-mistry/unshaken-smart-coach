@@ -68,6 +68,7 @@ def error_response(
     reaching its header step.
     """
     request_id = getattr(request.state, "request_id", None) or str(uuid4())
+    request.state.telemetry_failure_category = code
     response_headers = dict(headers or {})
     response_headers[REQUEST_ID_HEADER] = request_id
     response_headers["Cache-Control"] = "no-store"
