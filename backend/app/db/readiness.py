@@ -50,6 +50,19 @@ _SET_STATEMENT_TIMEOUT = sa.text(
     "SELECT set_config('statement_timeout', :milliseconds, true)"
 )
 _LOGGER = logging.getLogger("app.database_readiness")
+_LOOKUP_TABLES = frozenset({"exercise_categories", "body_parts"})
+
+
+def _lookup_statement(table_name: str) -> sa.TextClause:
+    """Build the fixed active-choice query for one approved lookup table."""
+    if table_name not in _LOOKUP_TABLES:
+        raise ValueError("Unsupported lookup table.")
+    return sa.text(
+        f"SELECT id, name, sort_order "
+        f"FROM {table_name} "
+        f"WHERE is_active IS TRUE "
+        f"ORDER BY sort_order ASC, id ASC"
+    )
 
 
 class ReadinessState(str, Enum):
@@ -281,7 +294,7 @@ class DatabaseReadiness:
 
     async def lookup(self, table_name: str) -> LookupResult:
         """Read one lookup list on an independent three-second wall-clock deadline."""
-        if table_name not in {"exercise_categories", "body_parts"}:
+        if table_name not in _LOOKUP_TABLES:
             return LookupResult(
                 ReadinessState.INTERNAL_ERROR,
                 (),
@@ -398,12 +411,7 @@ class DatabaseReadiness:
                 1,
                 min(MAX_STATEMENT_TIMEOUT_MS, int(remaining * 1_000)),
             )
-            query = sa.text(
-                f"SELECT id, name, sort_order "
-                f"FROM {table_name} "
-                f"WHERE is_active IS TRUE "
-                f"ORDER BY sort_order ASC, id ASC"
-            )
+            query = _lookup_statement(table_name)
             with connection.begin():
                 connection.execute(
                     _SET_STATEMENT_TIMEOUT,

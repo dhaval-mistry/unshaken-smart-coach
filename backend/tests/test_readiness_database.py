@@ -181,11 +181,6 @@ def test_live_lookup_order_is_sort_order_not_name_or_id(engine, disposable_url):
             "Bodyweight", "Machine/Other", "Dumbbell", "Barbell",
         ]
         assert [item["id"] for item in result.items] == [8, 7, 6, 5, 4, 3, 2, 1]
-        # The approved schema keeps sort_order unique, so an id tie-break is
-        # explicit in the query but no duplicate sort_order data is injected.
-        import inspect
-        source = inspect.getsource(DatabaseReadiness._lookup_sync)
-        assert "ORDER BY sort_order ASC, id ASC" in source
     finally:
         resources.shutdown()
         with engine.begin() as connection:

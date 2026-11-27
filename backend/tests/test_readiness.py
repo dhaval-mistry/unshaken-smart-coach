@@ -13,6 +13,7 @@ from app.db.readiness import (
     ReadinessState,
     _BoundedExecutor,
     _Cancellation,
+    _lookup_statement,
 )
 import pytest
 
@@ -58,6 +59,38 @@ def test_missing_table_maps_to_reference_data():
         DatabaseReadiness._classify_exception(exc)
         == ReadinessState.REFERENCE_DATA_UNAVAILABLE
     )
+
+
+def test_lookup_statement_orders_runtime_ties_by_sort_order_then_id():
+    """Run the production lookup statement against ties disallowed by PostgreSQL."""
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE exercise_categories ("
+                "id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+                "sort_order INTEGER NOT NULL, is_active BOOLEAN NOT NULL)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO exercise_categories "
+                "(id, name, sort_order, is_active) VALUES "
+                "(20, 'Aardvark', 2, TRUE), "
+                "(30, 'Zulu', 1, TRUE), "
+                "(10, 'Mike', 1, TRUE), "
+                "(5, 'Inactive', 1, FALSE)"
+            )
+
+            rows = connection.execute(
+                _lookup_statement("exercise_categories")
+            ).mappings().all()
+
+        assert [(row["sort_order"], row["id"], row["name"]) for row in rows] == [
+            (1, 10, "Mike"),
+            (1, 30, "Zulu"),
+            (2, 20, "Aardvark"),
+        ]
+    finally:
+        engine.dispose()
 
 
 def test_missing_permission_maps_to_database_unavailable():
