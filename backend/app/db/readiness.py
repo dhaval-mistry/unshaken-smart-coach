@@ -50,6 +50,19 @@ _SET_STATEMENT_TIMEOUT = sa.text(
     "SELECT set_config('statement_timeout', :milliseconds, true)"
 )
 _LOGGER = logging.getLogger("app.database_readiness")
+_LOOKUP_TABLES = frozenset({"exercise_categories", "body_parts"})
+
+
+def _lookup_statement(table_name: str) -> sa.TextClause:
+    """Build the fixed active-choice query for one approved lookup table."""
+    if table_name not in _LOOKUP_TABLES:
+        raise ValueError("Unsupported lookup table.")
+    return sa.text(
+        f"SELECT id, name, sort_order "
+        f"FROM {table_name} "
+        f"WHERE is_active IS TRUE "
+        f"ORDER BY sort_order ASC, id ASC"
+    )
 
 
 class ReadinessState(str, Enum):
@@ -66,6 +79,15 @@ class ReadinessResult:
     """One readiness outcome with nonsecret elapsed-time evidence."""
 
     state: ReadinessState
+    elapsed_seconds: float
+
+
+@dataclass(frozen=True)
+class LookupResult:
+    """One public lookup outcome, including only safe serialized choices."""
+
+    state: ReadinessState
+    items: tuple[dict, ...]
     elapsed_seconds: float
 
 
@@ -269,6 +291,156 @@ class DatabaseReadiness:
         finally:
             with self._controllers_lock:
                 self._controllers.discard(controller)
+
+    async def lookup(self, table_name: str) -> LookupResult:
+        """Read one lookup list on an independent three-second wall-clock deadline."""
+        if table_name not in _LOOKUP_TABLES:
+            return LookupResult(
+                ReadinessState.INTERNAL_ERROR,
+                (),
+                0.0,
+            )
+        started = self._clock()
+        deadline = started + READINESS_DEADLINE_SECONDS
+        if self._engine is None or self._closed:
+            return LookupResult(
+                ReadinessState.DATABASE_UNAVAILABLE,
+                (),
+                self._clock() - started,
+            )
+
+        controller = _Cancellation()
+        with self._controllers_lock:
+            if self._closed:
+                return LookupResult(
+                    ReadinessState.DATABASE_UNAVAILABLE,
+                    (),
+                    self._clock() - started,
+                )
+            self._controllers.add(controller)
+
+        future = self._executor.submit(
+            self._lookup_sync,
+            table_name,
+            deadline,
+            controller,
+        )
+        if future is None:
+            with self._controllers_lock:
+                self._controllers.discard(controller)
+            return LookupResult(
+                ReadinessState.DATABASE_UNAVAILABLE,
+                (),
+                self._clock() - started,
+            )
+
+        wrapped = asyncio.wrap_future(future)
+        work_timeout = max(
+            0.0,
+            deadline
+            - self._clock()
+            - CLEANUP_HEADROOM_SECONDS
+            - RESPONSE_HEADROOM_SECONDS,
+        )
+        try:
+            state, items = await asyncio.wait_for(
+                asyncio.shield(wrapped),
+                work_timeout,
+            )
+            return LookupResult(
+                state,
+                tuple(items),
+                self._clock() - started,
+            )
+        except asyncio.TimeoutError:
+            await self._cancel_and_drain(future, wrapped, controller, deadline)
+            return LookupResult(
+                ReadinessState.DATABASE_UNAVAILABLE,
+                (),
+                self._clock() - started,
+            )
+        except asyncio.CancelledError:
+            await self._cancel_and_drain(future, wrapped, controller, deadline)
+            raise
+        except Exception:
+            await self._cancel_and_drain(future, wrapped, controller, deadline)
+            return LookupResult(
+                ReadinessState.INTERNAL_ERROR,
+                (),
+                self._clock() - started,
+            )
+        finally:
+            with self._controllers_lock:
+                self._controllers.discard(controller)
+
+    def _lookup_sync(
+        self,
+        table_name: str,
+        deadline: float,
+        controller: _Cancellation,
+    ) -> tuple[ReadinessState, list[dict]]:
+        """Execute one fixed-table read within the caller's remaining budget."""
+        remaining_before_checkout = (
+            deadline
+            - self._clock()
+            - CLEANUP_HEADROOM_SECONDS
+        )
+        minimum_checkout_budget = (
+            POOL_TIMEOUT_SECONDS
+            + CONNECT_TIMEOUT_SECONDS
+            + MIN_DATABASE_WORK_SECONDS
+        )
+        if remaining_before_checkout < minimum_checkout_budget:
+            return ReadinessState.DATABASE_UNAVAILABLE, []
+
+        connection = None
+        invalidate = False
+        try:
+            connection = self._engine.connect()
+            driver = connection.connection.driver_connection
+            if not isinstance(driver, PsycopgConnection) or not controller.attach(driver):
+                invalidate = True
+                return ReadinessState.DATABASE_UNAVAILABLE, []
+
+            remaining = deadline - self._clock() - CLEANUP_HEADROOM_SECONDS
+            if remaining <= MIN_DATABASE_WORK_SECONDS or controller.requested:
+                invalidate = controller.requested
+                return ReadinessState.DATABASE_UNAVAILABLE, []
+
+            statement_ms = max(
+                1,
+                min(MAX_STATEMENT_TIMEOUT_MS, int(remaining * 1_000)),
+            )
+            query = _lookup_statement(table_name)
+            with connection.begin():
+                connection.execute(
+                    _SET_STATEMENT_TIMEOUT,
+                    {"milliseconds": f"{statement_ms}ms"},
+                )
+                rows = connection.execute(query).mappings().all()
+            if not rows:
+                return ReadinessState.REFERENCE_DATA_UNAVAILABLE, []
+            items = [
+                {
+                    "id": int(row["id"]),
+                    "name": str(row["name"]),
+                    "sort_order": int(row["sort_order"]),
+                }
+                for row in rows
+            ]
+            return ReadinessState.READY, items
+        except Exception as exc:
+            invalidate = invalidate or controller.uncertain
+            return self._classify_exception(exc), []
+        finally:
+            controller.detach()
+            if connection is not None:
+                try:
+                    if invalidate or controller.uncertain:
+                        connection.invalidate()
+                    connection.close()
+                except Exception:
+                    pass
 
     async def _cancel_and_drain(
         self,

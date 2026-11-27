@@ -7,13 +7,20 @@ They never accept the shared/development database.
 import asyncio
 import os
 import time
+import socket
+import threading
 
 import pytest
 import sqlalchemy as sa
+import httpx
+import uvicorn
 from sqlalchemy.engine import URL
 
 from app.db.config import database_engine, database_url
-from app.db.readiness import DatabaseReadiness, ReadinessState
+from app.db.readiness import (
+    DatabaseReadiness,
+    ReadinessState,
+)
 
 
 @pytest.fixture(scope="module")
@@ -47,6 +54,40 @@ def check_resource(resources):
     return asyncio.run(resources.check())
 
 
+def lookup_resource(resources, table_name):
+    return asyncio.run(resources.lookup(table_name))
+
+
+def start_lookup_http_server(resources):
+    """Start the real FastAPI app on a loopback socket with a live resource."""
+    from app import main
+
+    main.initialize = lambda **_: False
+    main.shutdown = lambda: True
+    main.app.state.database_readiness = resources
+    with socket.socket() as socket_handle:
+        socket_handle.bind(("127.0.0.1", 0))
+        port = socket_handle.getsockname()[1]
+    config = uvicorn.Config(
+        main.app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        lifespan="off",
+    )
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() >= deadline:
+            server.should_exit = True
+            thread.join(timeout=2)
+            raise AssertionError("HTTP lookup server did not start.")
+        time.sleep(0.01)
+    return server, thread, f"http://127.0.0.1:{port}"
+
+
 def test_live_seeded_data_is_ready(engine, disposable_url):
     with engine.begin() as connection:
         category_count = connection.execute(
@@ -58,6 +99,227 @@ def test_live_seeded_data_is_ready(engine, disposable_url):
     assert category_count > 0
     assert body_count > 0
     assert check(disposable_url).state == ReadinessState.READY
+
+
+def test_live_lookup_lists_exact_initial_order_and_none(engine, disposable_url):
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        categories = lookup_resource(resources, "exercise_categories")
+        parts = lookup_resource(resources, "body_parts")
+        assert categories.state == ReadinessState.READY
+        assert parts.state == ReadinessState.READY
+        assert [item["name"] for item in categories.items] == [
+            "Barbell", "Dumbbell", "Machine/Other", "Bodyweight",
+            "Assisted Bodyweight", "Reps Only", "Cardio", "Duration",
+        ]
+        assert [item["name"] for item in parts.items] == [
+            "None", "Arms", "Back", "Cardio", "Chest", "Core",
+            "Full Body", "Legs", "Olympic", "Other", "Shoulders",
+        ]
+        assert all(type(item["id"]) is int for item in categories.items + parts.items)
+        assert all(type(item["sort_order"]) is int for item in categories.items + parts.items)
+        assert parts.items[0]["name"] == "None"
+    finally:
+        resources.shutdown()
+
+
+def test_live_lookup_routes_return_real_http_lists(engine, disposable_url):
+    resources = DatabaseReadiness(disposable_url)
+    server = thread = base_url = None
+    try:
+        server, thread, base_url = start_lookup_http_server(resources)
+        with httpx.Client(base_url=base_url, timeout=5) as client:
+            categories = client.get("/api/v1/exercise-categories")
+            parts = client.get("/api/v1/body-parts")
+
+        assert categories.status_code == 200
+        assert categories.headers["cache-control"] == "no-store"
+        assert set(categories.json()) == {"items"}
+        assert [item["name"] for item in categories.json()["items"]] == [
+            "Barbell", "Dumbbell", "Machine/Other", "Bodyweight",
+            "Assisted Bodyweight", "Reps Only", "Cardio", "Duration",
+        ]
+        assert parts.status_code == 200
+        assert parts.headers["cache-control"] == "no-store"
+        assert [item["name"] for item in parts.json()["items"]] == [
+            "None", "Arms", "Back", "Cardio", "Chest", "Core",
+            "Full Body", "Legs", "Olympic", "Other", "Shoulders",
+        ]
+    finally:
+        if server is not None:
+            server.should_exit = True
+            if thread is not None:
+                thread.join(timeout=5)
+        resources.shutdown()
+
+
+def test_live_lookup_order_is_sort_order_not_name_or_id(engine, disposable_url):
+    with engine.begin() as connection:
+        before = connection.execute(sa.text(
+            "SELECT id, name, sort_order FROM exercise_categories ORDER BY id"
+        )).mappings().all()
+        connection.execute(sa.text(
+            "UPDATE exercise_categories SET sort_order = id + 100"
+        ))
+        connection.execute(sa.text(
+            "UPDATE exercise_categories SET sort_order = CASE name "
+            "WHEN 'Barbell' THEN 8 "
+            "WHEN 'Dumbbell' THEN 7 "
+            "WHEN 'Machine/Other' THEN 6 "
+            "WHEN 'Bodyweight' THEN 5 "
+            "WHEN 'Assisted Bodyweight' THEN 4 "
+            "WHEN 'Reps Only' THEN 3 "
+            "WHEN 'Cardio' THEN 2 "
+            "WHEN 'Duration' THEN 1 END"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        result = lookup_resource(resources, "exercise_categories")
+        assert result.state == ReadinessState.READY
+        assert [item["name"] for item in result.items] == [
+            "Duration", "Cardio", "Reps Only", "Assisted Bodyweight",
+            "Bodyweight", "Machine/Other", "Dumbbell", "Barbell",
+        ]
+        assert [item["id"] for item in result.items] == [8, 7, 6, 5, 4, 3, 2, 1]
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "UPDATE exercise_categories SET sort_order = id + 100"
+            ))
+            for row in before:
+                connection.execute(
+                    sa.text(
+                        "UPDATE exercise_categories SET sort_order = :sort_order "
+                        "WHERE id = :id"
+                    ),
+                    {"id": row["id"], "sort_order": row["sort_order"]},
+                )
+
+
+@pytest.mark.parametrize(
+    ("table", "missing_column", "path"),
+    [
+        ("exercise_categories", "sort_order", "/api/v1/exercise-categories"),
+        ("body_parts", "sort_order", "/api/v1/body-parts"),
+    ],
+)
+def test_live_lookup_missing_column_route_is_safe_internal_error(
+    engine, disposable_url, table, missing_column, path
+):
+    with engine.begin() as connection:
+        original = connection.execute(sa.text(
+            f"SELECT id, sort_order FROM {table} ORDER BY id"
+        )).mappings().all()
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            f"ALTER TABLE {table} DROP COLUMN {missing_column} CASCADE"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    server = thread = None
+    try:
+        server, thread, base_url = start_lookup_http_server(resources)
+        with httpx.Client(base_url=base_url, timeout=5) as client:
+            response = client.get(path)
+        assert response.status_code == 500
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["error"]["code"] == "internal_error"
+        assert set(response.json()["error"]) == {"code", "message", "request_id"}
+        assert response.json()["error"]["request_id"] == response.headers["x-request-id"]
+    finally:
+        if server is not None:
+            server.should_exit = True
+            if thread is not None:
+                thread.join(timeout=5)
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                f"ALTER TABLE {table} "
+                f"ADD COLUMN {missing_column} SMALLINT"
+            ))
+        with engine.begin() as connection:
+            for row in original:
+                connection.execute(
+                    sa.text(
+                        f"UPDATE {table} SET {missing_column} = :sort_order "
+                        "WHERE id = :id"
+                    ),
+                    {"id": row["id"], "sort_order": row["sort_order"]},
+                )
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                f"ALTER TABLE {table} "
+                f"ALTER COLUMN {missing_column} SET NOT NULL"
+            ))
+            connection.execute(sa.text(
+                f"ALTER TABLE {table} "
+                f"ADD CONSTRAINT uq_{table}_sort_order "
+                f"UNIQUE ({missing_column})"
+            ))
+
+
+def test_live_lookup_omits_inactive_without_mutating_rows(engine, disposable_url):
+    with engine.begin() as connection:
+        before = connection.execute(sa.text(
+            "SELECT id, name, sort_order, is_active "
+            "FROM exercise_categories ORDER BY id"
+        )).mappings().all()
+        connection.execute(sa.text(
+            "UPDATE exercise_categories SET is_active = FALSE "
+            "WHERE name = 'Duration'"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        categories = lookup_resource(resources, "exercise_categories")
+        assert categories.state == ReadinessState.READY
+        assert "Duration" not in [item["name"] for item in categories.items]
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "UPDATE exercise_categories SET is_active = TRUE "
+                "WHERE name = 'Duration'"
+            ))
+            after = connection.execute(sa.text(
+                "SELECT id, name, sort_order, is_active "
+                "FROM exercise_categories ORDER BY id"
+            )).mappings().all()
+        assert [dict(row) for row in before] == [dict(row) for row in after]
+
+
+def test_live_lookup_empty_list_is_reference_unavailable(engine, disposable_url):
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "UPDATE body_parts SET is_active = FALSE"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        result = lookup_resource(resources, "body_parts")
+        assert result.state == ReadinessState.REFERENCE_DATA_UNAVAILABLE
+        assert result.items == ()
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "UPDATE body_parts SET is_active = TRUE"
+            ))
+
+
+def test_live_lookup_missing_table_is_reference_unavailable(engine, disposable_url):
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "ALTER TABLE body_parts RENAME TO body_parts_hold"
+        ))
+    resources = DatabaseReadiness(disposable_url)
+    try:
+        result = lookup_resource(resources, "body_parts")
+        assert result.state == ReadinessState.REFERENCE_DATA_UNAVAILABLE
+    finally:
+        resources.shutdown()
+        with engine.begin() as connection:
+            connection.execute(sa.text(
+                "ALTER TABLE body_parts_hold RENAME TO body_parts"
+            ))
 
 
 def test_live_repeated_reads_reuse_pool_without_exhaustion(engine, disposable_url):

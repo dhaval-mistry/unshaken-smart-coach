@@ -227,6 +227,17 @@ Use these endpoints (substitute a private `BACKEND_PORT` override if needed):
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 
+Implementation boundary for exercise forms: issue #14's future form is not
+built here, but a future implementation must load
+`GET /api/v1/exercise-categories` and `GET /api/v1/body-parts` independently,
+wait for both successful `items` responses, and keep submission unavailable
+until both lists are available. One successful response is not enough to show
+an incomplete form. Any lookup failure must show a clear load failure and offer
+a person-controlled retry; the form must not invent choices or silently select
+`None`. This requirement follows
+[issue #14](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/14)
+and [the approved API behavior](../api/foundation.md).
+
 `/health/live` is process liveness only. `/health/ready` is the bounded
 application/database read check and is not container health or migration
 verification. The PostgreSQL healthy dependency orders initial container

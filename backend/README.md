@@ -38,7 +38,8 @@ finally:
 
 The FastAPI application calls the same initialization and shutdown functions
 once in its lifespan. Its current HTTP surface is liveness and generated API
-documentation; product endpoints remain separate work.
+documentation, bounded readiness, and the public exercise-category and
+body-part lookup endpoints.
 
 Supported event names are `operation.started`, `operation.completed` and
 `operation.failed`. Supported operations are `database`, `lookup`, `request`,
