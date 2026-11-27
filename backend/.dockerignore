@@ -16,6 +16,9 @@ app/*
 !app/api/
 app/api/*
 !app/api/*.py
+!app/auth/
+app/auth/*
+!app/auth/*.py
 !app/db/
 app/db/*
 !app/db/*.py

@@ -418,3 +418,40 @@ requests made. Database guards were exercised with synthetic data only.
 References: [SQLAlchemy constraints](https://docs.sqlalchemy.org/en/20/core/constraints.html),
 [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html),
 [Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html).
+
+### Local browser authentication
+
+Issue #48 reads settings from the private JSON file named by
+`USC_AUTH_SETTINGS_FILE`. Keep the file outside the repository and build context.
+Use the same HTTPS origin for the UI and API. The file contains:
+
+```json
+{
+  "origin": "https://your-owned-dev-host.example",
+  "google_client_id": "placeholder",
+  "google_client_secret": "placeholder",
+  "apple_client_id": "placeholder-services-id",
+  "apple_team_id": "placeholder",
+  "apple_key_id": "placeholder",
+  "apple_signing_key": "placeholder-PEM-with-escaped-newlines",
+  "active_key_version": "local-v1",
+  "encryption_keys": { "local-v1": "placeholder-base64-of-32-random-bytes" }
+}
+```
+
+Pass the path in the local process environment. For Docker, mount the file
+read-only and set the variable to its container path. Keep older versions in
+the file until no pending or durable credential requires them. Never copy the
+file into an image or send its contents in an issue or test report.
+
+Provider setup and exact registrations are tracked in #47. The registered
+Google and Apple callbacks under the same origin are
+`/api/v1/auth/google/callback` and `/api/v1/auth/apple/callback`. The
+application sends the browser to the fixed UI completion path
+`/auth/complete`. Keep proxy logs free of callback query strings and request
+bodies. The Docker command disables native access logs, and for direct local
+authentication testing use `uvicorn app.main:app --no-access-log`.
+
+Run `uv run python scripts/verify_database.py` from `backend` for disposable
+PostgreSQL 17 checks with signed synthetic provider fixtures. This does not
+require provider accounts or secrets and does not prove real browser sign-in.

@@ -12,6 +12,10 @@ from app.api.middleware import REQUEST_ID_HEADER
 
 # Fixed, safe messages. Never include the URL, method, or anything the caller sent.
 HTTP_ERRORS = {
+    401: ("authentication_required", "Authentication is required."),
+    403: ("forbidden", "This request is forbidden."),
+    422: ("invalid_request", "The request contains unsupported input."),
+    503: ("authentication_unavailable", "Authentication is unavailable."),
     404: ("not_found", "The requested resource was not found."),
     405: ("method_not_allowed", "This method is not allowed for this resource."),
 }

@@ -503,6 +503,8 @@ def capture_legacy_rows(c):
     return {table: c.exec_driver_sql(
         f"SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'measurement_kind' ORDER BY id),'[]') FROM {table} t"
         if table == "exercises" else
+        f"SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'provider_revoked_at' ORDER BY id),'[]') FROM {table} t"
+        if table == "user_identities" else
         f"SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]') FROM {table} t"
     ).scalar_one() for table in ("users", "user_identities", "exercises", "workout_templates", "template_exercises", "template_sets",
                                 "workout_sessions", "session_exercises", "session_sets", "exercise_categories", "body_parts")}
@@ -535,7 +537,7 @@ def test_upgrade_preserves_legacy_values_and_original_kind(engine, monkeypatch):
                 assert capture_legacy_rows(c) == before
                 assert c.execute(sa.select(s.exercises.c.measurement_kind).where(s.exercises.c.id == ex)).scalar_one() == "reps"
                 assert c.exec_driver_sql("SELECT bool_and(e.measurement_kind=c.measurement_kind) FROM exercises e JOIN exercise_categories c ON c.id=e.category_id").scalar_one() is True
-                assert MigrationContext.configure(c).get_current_revision() == "0004_auth_storage"
+                assert MigrationContext.configure(c).get_current_revision() == "0005_apple_onboarding"
             command.check(cfg)
             patch.setenv("USC_ALLOW_DISPOSABLE_DOWNGRADE", "1")
             command.downgrade(cfg, "0002_master_records")
@@ -610,7 +612,7 @@ def test_downgrade_rejects_new_incompatible_history(engine, monkeypatch, case):
             with pytest.raises(RuntimeError, match="conflicts"):
                 command.downgrade(cfg, "0002_master_records")
             with db.connect() as c:
-                assert MigrationContext.configure(c).get_current_revision() == "0004_auth_storage"
+                assert MigrationContext.configure(c).get_current_revision() == "0005_apple_onboarding"
         finally:
             db.dispose()
 

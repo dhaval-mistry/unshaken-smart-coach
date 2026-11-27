@@ -1,4 +1,4 @@
-﻿# Task state
+# Task state
 
 ## Latest completed milestone
 
@@ -16,3 +16,22 @@
 - Review the #46 pull request before any merge or database rollout.
 - Issue #48 owns FastAPI authentication and encryption before persistence.
 - Issue #47 is the owner-managed provider and local HTTPS setup.
+
+## Issue #48 in progress
+
+- PR #49 merged into main at 54f02ae and closed #46.
+- Feature branch: feature/48-provider-authentication.
+- Added the Apple credential encryption primitive and verified its round trip
+  and failure handling with synthetic keys. Persistence and the FastAPI
+  authentication flows are still pending.
+- Real provider browser verification depends on the owner-managed #47 setup.
+
+## Issue #48 implementation milestone
+
+- Added the approved revision 0005, pending Apple encryption, promotion,
+  revocation state and bounded cleanup.
+- Wired local FastAPI sign-in, session, onboarding, logout, linking and
+  notification routes using private runtime settings.
+- Signed synthetic Google and Apple fixtures exercise local provider exchanges
+  on the disposable PostgreSQL 17 runner. Live browser and provider setup
+  remains tracked in #47.

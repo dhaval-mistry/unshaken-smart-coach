@@ -11,7 +11,7 @@ from app.telemetry import (
     log_http_request,
     record_http_request,
 )
-from app.telemetry.logging import FAILURE_CATEGORIES, HTTP_ROUTES
+from app.telemetry.logging import AUTH_ROUTES, FAILURE_CATEGORIES, HTTP_ROUTES
 
 REQUEST_ID_HEADER = "X-Request-ID"
 LOOKUP_ROUTES = {
@@ -42,7 +42,7 @@ async def request_context(request: Request, call_next):
     failure_category = "internal_error"
     span_context = (
         http_request_span(route, request.method, request_id)
-        if route in LOOKUP_ROUTES
+        if route in LOOKUP_ROUTES | AUTH_ROUTES
         else None
     )
     if span_context is None:
@@ -99,7 +99,7 @@ async def request_context(request: Request, call_next):
                 request_id=request_id,
             )
 
-    if route and route not in LOOKUP_ROUTES:
+    if route and route not in LOOKUP_ROUTES | AUTH_ROUTES:
         status_code = response.status_code
         failure_category = _failure_category(request, status_code)
         _record_request(

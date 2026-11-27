@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.authentication import router as authentication_router
+from app.auth.runtime import authentication_runtime
 from app.api.errors import register_error_handlers
 from app.api.health import router as health_router, shutdown_database_readiness
 from app.api.lookups import router as lookups_router
@@ -40,7 +42,8 @@ async def lifespan(_app: FastAPI):
     _app.state.database_readiness = None
     initialize(service="unshaken-backend")
     try:
-        yield
+        async with authentication_runtime(_app):
+            yield
     finally:
         shutdown_database_readiness(_app)
         shutdown()
@@ -72,3 +75,5 @@ app.middleware("http")(request_context)
 register_error_handlers(app)
 app.include_router(health_router)
 app.include_router(lookups_router)
+
+app.include_router(authentication_router)

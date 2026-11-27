@@ -96,6 +96,40 @@ Transport failures are not proof of revoked consent. No Google offline API scope
 or refresh token is needed just for login. Immediate detection of every external
 Google account change is not promised by the initial eight-hour session policy.
 
+### First Apple sign-in
+
+For a new Apple identity, FastAPI requires a usable refresh credential from
+the verified authorization-code exchange before opening onboarding. If it is
+missing, return a safe sign-in error and prompt the user to start a fresh
+Apple authorization. Create no onboarding transaction, account, identity, or
+session in that case. Do not retry the consumed authorization code. For an
+existing identity, a successful verified response without a replacement
+credential leaves its stored credential intact.
+
+Encrypt the credential before writing it to the browser-bound, single-use
+onboarding transaction. Store only bounded ciphertext and its key version.
+Authenticate the pending credential against the transaction ID, provider,
+verified issuer and subject, purpose, and key version. The browser never
+receives the credential. Keep the existing five-minute deadline.
+
+On completion, validate the browser and CSRF binding, then consume the
+unexpired transaction once using the database time at consumption. Authenticate
+the ciphertext with its recorded key version and re-encrypt for the durable
+Apple identity using the active version. Create the user, identity, durable
+credential and session and clear the pending credential in the same PostgreSQL
+transaction. Issue the session cookie after commit. A concurrent completion or
+identity conflict cannot create a second account, attach to another account,
+or overwrite its credential. Any failure rolls back all completion writes.
+Missing keys and invalid ciphertext fail closed with a safe error.
+
+Expired credentials are immediately unusable. Clear expired pending values
+in bounded batches on a five-minute cleanup cadence while the backend runs,
+including a cleanup pass on startup. Retry cleanup on the next pass after a
+failure. Cleanup must recheck expiry at write time and serialize with
+completion on the same row. Report cleanup failures using counts or bounded
+outcomes only. Keep old key versions available while any pending or durable
+ciphertext still needs them.
+
 ## Endpoints and storage
 
 | Boundary | Responsibility |
@@ -113,13 +147,13 @@ Use shared safe errors, no-store headers and finite provider timeouts. Provider
 failure returns safe `503 authentication_unavailable`; failed proof returns
 safe `401 authentication_failed` without raw provider details.
 
-One reviewed successor migration must permit `apple` identities and add the
-session, temporary login/onboarding transaction and encrypted Apple credential
-storage above. Existing code permits only `google`/`microsoft`; documentation
-alone does not change that constraint. Reject future Microsoft sign-in without
-deleting existing identity rows or history. Inspect legacy rows during migration
-planning; existing Microsoft-only account transition requires owner direction.
-Freeze migrations 0001–0003. No separate auth tables per workout API.
+Migration `0004_auth_storage` provides identities, sessions, authentication
+transactions and durable Apple credential storage. Freeze migrations
+`0001`–`0004`. Add a reviewed successor migration in #48 for the pending
+ciphertext and key-version pair. Both fields are absent or present together.
+Only verified, unconsumed Apple onboarding rows may hold the pair. Existing
+rows need no backfill. Existing Microsoft identities and retained history
+remain intact. No separate auth tables per workout API.
 
 Keep handlers in `app/api`, shared verification/current-user logic in a small
 `app/auth` package, and persistence in `app/db`. Extend the Docker source
@@ -152,6 +186,13 @@ disabled accounts, safe telemetry and provider/database outages. Browser checks
 verify both providers, secure cookies, first-login onboarding and logout. Report
 fixture tests separately from real provider tests; never weaken checks for local
 development or substitute a caller-provided user ID.
+
+For Apple onboarding, verify missing credentials on first sign-in and
+preservation of an existing credential without a replacement. Cover atomic
+completion and rollback, duplicate completion and identity conflicts,
+key-version changes, invalid ciphertext and missing keys, and expiry and cleanup.
+Verify no plaintext persists or reaches responses or telemetry. Test the
+successor migration on disposable PostgreSQL 17 with existing rows.
 
 ## Approval and handoff
 
