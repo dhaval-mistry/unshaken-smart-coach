@@ -38,14 +38,14 @@ class AuthRuntime:
 
 def _clean(runtime: AuthRuntime) -> None:
     """Attempt one bounded batch, retrying a failure on the next cadence."""
-    from app.db.auth_storage import clear_expired_apple_credentials
+    from app.db.auth_storage import clear_stale_auth_rows
 
     try:
         with runtime.engine.begin() as connection:
             connection.exec_driver_sql("SET LOCAL statement_timeout = '2s'")
-            clear_expired_apple_credentials(connection)
+            clear_stale_auth_rows(connection)
     except SQLAlchemyError:
-        _LOG.warning("apple_onboarding_cleanup_failed")
+        _LOG.warning("authentication_cleanup_failed")
 
 
 async def _periodic_cleanup(runtime: AuthRuntime) -> None:

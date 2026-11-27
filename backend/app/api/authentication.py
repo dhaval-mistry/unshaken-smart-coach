@@ -93,6 +93,25 @@ def current_user(request: Request):
     return profile
 
 
+def _admit_source(request: Request, connection, settings) -> bool:
+    """Rate-limit the ASGI peer without storing its IP or reading raw forwarding headers."""
+    from ipaddress import ip_address
+    from app.db.auth_storage import admit_auth_source
+
+    try:
+        address = str(ip_address(request.client.host)) if request.client else "unknown"
+    except ValueError:
+        address = "unknown"
+    key = settings.encryption_keys[settings.active_key_version]
+    digest = hmac.digest(key, b"unshaken:auth-source:v1:" + address.encode("ascii"), "sha256")
+    return admit_auth_source(connection, digest)
+
+
+def _rate_limit(request: Request):
+    """Return a fixed response for a full source window."""
+    return error_response(request, 429, "rate_limited", "Try again later.", {"Retry-After": "300"})
+
+
 @router.get("/{provider}/start")
 def start(provider: str, request: Request):
     """Start a five-minute browser-bound Google or Apple flow."""
@@ -108,6 +127,8 @@ def start(provider: str, request: Request):
     challenge = base64.urlsafe_b64encode(sha256(verifier.encode()).digest()).decode().rstrip("=")
     try:
         with runtime.engine.begin() as connection:
+            if not _admit_source(request, connection, runtime.settings):
+                return _rate_limit(request)
             create_transaction(connection, provider=provider, purpose="login",
                                binding=binding, state=state, nonce=nonce)
     except (SQLAlchemyError, AuthenticationBusy):
@@ -233,8 +254,11 @@ def onboard(profile: Onboarding, request: Request):
             token = finish_onboarding(connection, state, binding, name,
                                       profile.preferred_weight_unit, runtime.settings)
     except AuthenticationFailed:
-        return error_response(request, 401, "authentication_failed",
-                              "Sign-in failed. Start a fresh authorization.")
+        response = error_response(request, 401, "authentication_failed",
+                                  "Sign-in failed. Start a fresh authorization.")
+        for key in (_ONBOARDING, _BINDING):
+            response.delete_cookie(key, path="/", secure=True, httponly=True, samesite="lax")
+        return response
     except (SQLAlchemyError, EncryptionError):
         return _database_failure(request)
     response = _session_response(token)
@@ -315,6 +339,8 @@ def link(provider: str, request: Request):
             owner = freshly_verified_owner(connection, source, provider)
             if owner is None:
                 return error_response(request, 403, "forbidden", "Sign in again before linking.")
+            if not _admit_source(request, connection, runtime.settings):
+                return _rate_limit(request)
             create_transaction(connection, provider=provider, purpose="link", binding=binding,
                                state=state, nonce=nonce, user_id=owner, link_session_hash=source)
     except (SQLAlchemyError, AuthenticationBusy):

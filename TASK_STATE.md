@@ -35,3 +35,11 @@
 - Signed synthetic Google and Apple fixtures exercise local provider exchanges
   on the disposable PostgreSQL 17 runner. Live browser and provider setup
   remains tracked in #47.
+
+## PR #50 review follow-up
+
+- Signed Apple revocation serializes with pending onboarding and identity writes,
+  clears pending credentials and invalidates affected established sessions.
+- Login and linking admission enforce short per-source windows. Startup and
+  periodic cleanup remove stale rows in bounded batches, with a small additional
+  batch during transaction admission.

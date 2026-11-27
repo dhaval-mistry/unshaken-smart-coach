@@ -31,7 +31,7 @@ HTTP_ROUTES = {
 HTTP_ROUTES |= AUTH_ROUTES
 HTTP_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 FAILURE_CATEGORIES = {
-    "authentication_required", "authentication_failed", "authentication_unavailable", "forbidden",
+    "authentication_required", "authentication_failed", "authentication_unavailable", "forbidden", "rate_limited",
     "none",
     "invalid_request",
     "not_found",

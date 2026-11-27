@@ -456,3 +456,11 @@ authentication testing use `uvicorn app.main:app --no-access-log`.
 Run `uv run python scripts/verify_database.py` from `backend` for disposable
 PostgreSQL 17 checks with signed synthetic provider fixtures. This does not
 require provider accounts or secrets and does not prove real browser sign-in.
+
+Authentication start and linking share a limit of ten starts per network source
+in five minutes. Users behind the same NAT may share a window. The backend
+uses the ASGI peer address and does not read raw forwarding headers. Configure
+the reviewed HTTPS proxy and server to accept forwarding only from the trusted
+proxy and to replace client-supplied forwarding headers. The application stores
+a keyed digest for the window instead of the raw address. It removes expired
+windows and consumed or expired transactions in bounded batches.

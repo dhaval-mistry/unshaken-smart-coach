@@ -1,5 +1,8 @@
 """Atomic authentication transactions and persistence."""
 
+import json
+from hashlib import sha256
+
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Connection
@@ -15,6 +18,7 @@ from app.auth.settings import AuthSettings
 from app.db.schema import (
     apple_onboarding_credentials,
     apple_revocation_credentials,
+    apple_revoked_proofs,
     auth_sessions,
     auth_transactions,
     user_identities,
@@ -46,6 +50,9 @@ def create_transaction(
     )).scalar_one()
     if active >= 1000:
         raise AuthenticationBusy("Authentication capacity unavailable")
+    from app.db.auth_storage import clear_stale_auth_rows
+
+    clear_stale_auth_rows(c, limit=10)
     c.execute(auth_transactions.insert().values(
         binding_hash=token_hash(binding), state_hash=token_hash(state),
         nonce_hash=token_hash(nonce), provider=provider, purpose=purpose,
@@ -87,10 +94,29 @@ def _store_apple(c: Connection, settings: AuthSettings, identity, refresh: bytes
     ))
 
 
+def _lock_apple_proof(c: Connection, issuer: str, subject: str) -> bytes:
+    """Serialize mutations of this Apple identity, even before a user exists."""
+    material = json.dumps(["apple", issuer, subject]).encode("ascii")
+    digest = sha256(material).digest()
+    key = int.from_bytes(digest[:8], "big", signed=True)
+    c.execute(sa.select(sa.func.pg_advisory_xact_lock(key)))
+    return digest
+
+
+def _require_live_apple_proof(c: Connection, issuer: str, subject: str) -> None:
+    """Reject an identity whose signed revocation has already been recorded."""
+    digest = _lock_apple_proof(c, issuer, subject)
+    if c.execute(sa.select(apple_revoked_proofs.c.proof_hash)
+                 .where(apple_revoked_proofs.c.proof_hash == digest)).scalar_one_or_none():
+        raise AuthenticationFailed("Identity unavailable")
+
+
 def finish_login(c: Connection, result: ExchangeResult, binding: str,
                  settings: AuthSettings, providers: Providers):
     """Issue a session to an existing identity or begin browser-bound onboarding."""
     identity = result.identity
+    if identity.provider == "apple":
+        _require_live_apple_proof(c, identity.issuer, identity.subject)
     ids, user = user_identities.c, users.c
     current = c.execute(
         sa.select(ids.id, ids.user_id, ids.provider_revoked_at, user.status)
@@ -147,6 +173,13 @@ def finish_onboarding(
     c: Connection, state: str, binding: str, name: str, unit: str, settings: AuthSettings
 ) -> str:
     """Consume proof and atomically create the user, identity and session."""
+    t = auth_transactions.c
+    proof = c.execute(sa.select(t.provider, t.verified_issuer, t.verified_subject).where(
+        t.state_hash == token_hash(state), t.binding_hash == token_hash(binding),
+        t.purpose == "onboarding", t.consumed_at.is_(None),
+    )).one_or_none()
+    if proof is not None and proof.provider == "apple":
+        _require_live_apple_proof(c, proof.verified_issuer, proof.verified_subject)
     tx = consume(c, state, binding, None, ("onboarding",))
     pending = apple_onboarding_credentials
     refresh = None
@@ -179,7 +212,14 @@ def finish_onboarding(
 
 
 def revoke_apple_identity(c: Connection, issuer: str, subject: str) -> None:
-    """Revoke a verified Apple identity and invalidate all sessions it created."""
+    """Record revocation and clear matching pending and established credentials."""
+    digest = _lock_apple_proof(c, issuer, subject)
+    c.execute(insert(apple_revoked_proofs).values(proof_hash=digest).on_conflict_do_nothing())
+    t = auth_transactions.c
+    c.execute(auth_transactions.delete().where(
+        t.provider == "apple", t.purpose == "onboarding",
+        t.verified_issuer == issuer, t.verified_subject == subject,
+    ))
     ids = user_identities.c
     identity = c.execute(
         user_identities.update().where(
@@ -212,6 +252,8 @@ def freshly_verified_owner(c: Connection, session_hash: bytes, provider: str):
 def finish_link(c: Connection, tx, result: ExchangeResult, settings: AuthSettings) -> str:
     """Attach only an unowned identity and rotate all old sessions atomically."""
     identity = result.identity
+    if identity.provider == "apple":
+        _require_live_apple_proof(c, identity.issuer, identity.subject)
     owner = tx["user_id"]
     active = c.execute(
         sa.select(users.c.id).where(users.c.id == owner, users.c.status == "active")

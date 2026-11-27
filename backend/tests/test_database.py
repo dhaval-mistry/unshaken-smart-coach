@@ -103,7 +103,7 @@ def test_schema_and_seed_contract(engine):
     with engine.connect() as c:
         inspector=sa.inspect(c)
         assert set(inspector.get_table_names())==set(s.metadata.tables)|{"alembic_version"}
-        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==156
+        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==160
         # The human-readable dictionary is an independent nullability contract.
         import re
         design=(Path(__file__).resolve().parents[2]/'docs/database/design.md').read_text(encoding='utf-8')
@@ -637,13 +637,15 @@ def test_auth_transaction_concurrent_consumption(engine):
 
 def test_pending_apple_cleanup(engine):
     """Delete expired credentials in bounded batches and retain live ones."""
-    from app.db.auth_storage import clear_expired_apple_credentials
+    from app.db.auth_storage import admit_auth_source, clear_stale_auth_rows
 
     tx = s.auth_transactions
     pending = s.apple_onboarding_credentials
     expired = [os.urandom(32), os.urandom(32)]
     live = os.urandom(32)
     with engine.begin() as c:
+        while any(clear_stale_auth_rows(c)):
+            pass
         for state in (*expired, live):
             age = "6 minutes" if state in expired else "0 minutes"
             created = sa.func.statement_timestamp() - sa.cast(age, sa.Interval)
@@ -656,10 +658,20 @@ def test_pending_apple_cleanup(engine):
             c.execute(pending.insert().values(
                 state_hash=state, ciphertext=b"synthetic opaque bytes", key_version="test-v1",
             ))
-        assert clear_expired_apple_credentials(c, limit=1) == 1
-        assert clear_expired_apple_credentials(c, limit=1) == 1
-        assert clear_expired_apple_credentials(c, limit=1) == 0
+        assert clear_stale_auth_rows(c, limit=1)[0] == 1
+        assert clear_stale_auth_rows(c, limit=1)[0] == 1
+        assert clear_stale_auth_rows(c, limit=1) == (0, 0)
         assert c.execute(sa.select(pending.c.state_hash)).scalars().all() == [live]
+        source = os.urandom(32)
+        other = os.urandom(32)
+        for _ in range(10):
+            assert admit_auth_source(c, source)
+        assert not admit_auth_source(c, source)
+        assert admit_auth_source(c, other)
+        c.execute(s.auth_source_windows.update().where(s.auth_source_windows.c.source_hash == source)
+                  .values(expires_at=sa.func.statement_timestamp() - sa.text("interval '1 second'")))
+        assert clear_stale_auth_rows(c, limit=1) == (0, 1)
+        assert admit_auth_source(c, source)
 
 
 @pytest.mark.parametrize("provider", ["google", "apple"])
@@ -727,6 +739,36 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
         ), raising=False)
         browser = TestClient(app, base_url=origin, follow_redirects=False)
         if provider == "apple":
+            original_subject = subject
+            subject = str(uuid4())
+            consent = browser.get("/api/v1/auth/apple/start")
+            flow.update(parse_qs(urlsplit(consent.headers["location"]).query))
+            pending_callback = browser.post("/api/v1/auth/apple/callback", data={
+                "state": flow["state"][0], "code": "synthetic-code",
+            })
+            assert pending_callback.status_code == 303, pending_callback.text
+            pending_csrf = browser.get("/api/v1/auth/onboarding").json()["csrf_token"]
+            pending_notification = jwt.encode(
+                dict(iss=issuers["apple"], aud="apple-fixture",
+                     iat=datetime.now(timezone.utc), jti=str(uuid4()),
+                     events={"type": "consent-revoked", "sub": subject}),
+                issuer_key, algorithm="RS256", headers={"kid": "test-id"},
+            )
+            notify_result = browser.post("/api/v1/auth/apple/notifications",
+                                         json={"payload": pending_notification})
+            assert notify_result.status_code == 200
+            declined = browser.post("/api/v1/auth/onboarding", json={
+                "display_name": "Synthetic Revoked User", "preferred_weight_unit": "lb",
+            }, headers={"Origin": origin, "X-CSRF-Token": pending_csrf})
+            assert declined.status_code == 401, declined.text
+            with engine.connect() as c:
+                assert not c.execute(sa.select(s.auth_transactions.c.state_hash).where(
+                    s.auth_transactions.c.verified_subject == subject,
+                )).first()
+                assert not c.execute(sa.select(s.user_identities.c.id).where(
+                    s.user_identities.c.subject == subject,
+                )).first()
+            subject = original_subject
             include_refresh = False
             initiated = browser.get("/api/v1/auth/apple/start")
             flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
