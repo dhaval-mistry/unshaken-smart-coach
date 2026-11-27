@@ -504,7 +504,7 @@ def capture_legacy_rows(c):
         f"SELECT COALESCE(jsonb_agg(to_jsonb(t) - 'measurement_kind' ORDER BY id),'[]') FROM {table} t"
         if table == "exercises" else
         f"SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]') FROM {table} t"
-    ).scalar_one() for table in ("exercises", "workout_templates", "template_exercises", "template_sets",
+    ).scalar_one() for table in ("users", "user_identities", "exercises", "workout_templates", "template_exercises", "template_sets",
                                 "workout_sessions", "session_exercises", "session_sets", "exercise_categories", "body_parts")}
 
 
@@ -522,6 +522,11 @@ def test_upgrade_preserves_legacy_values_and_original_kind(engine, monkeypatch):
                 ex, workout = legacy_fixture(c)
                 for category in (1, 7, 8):
                     legacy_fixture(c, category=category)
+                c.exec_driver_sql("""
+                    INSERT INTO user_identities (user_id, provider, issuer, subject)
+                    SELECT id, 'microsoft', 'synthetic-legacy-issuer', 'synthetic-legacy-subject'
+                    FROM users ORDER BY id LIMIT 1
+                """)
             with db.connect() as c:
                 before = capture_legacy_rows(c)
             command.upgrade(cfg, "head")
@@ -530,7 +535,7 @@ def test_upgrade_preserves_legacy_values_and_original_kind(engine, monkeypatch):
                 assert capture_legacy_rows(c) == before
                 assert c.execute(sa.select(s.exercises.c.measurement_kind).where(s.exercises.c.id == ex)).scalar_one() == "reps"
                 assert c.exec_driver_sql("SELECT bool_and(e.measurement_kind=c.measurement_kind) FROM exercises e JOIN exercise_categories c ON c.id=e.category_id").scalar_one() is True
-                assert MigrationContext.configure(c).get_current_revision() == "0003_workout_follow_up"
+                assert MigrationContext.configure(c).get_current_revision() == "0004_auth_storage"
             command.check(cfg)
             patch.setenv("USC_ALLOW_DISPOSABLE_DOWNGRADE", "1")
             command.downgrade(cfg, "0002_master_records")
@@ -605,7 +610,7 @@ def test_downgrade_rejects_new_incompatible_history(engine, monkeypatch, case):
             with pytest.raises(RuntimeError, match="conflicts"):
                 command.downgrade(cfg, "0002_master_records")
             with db.connect() as c:
-                assert MigrationContext.configure(c).get_current_revision() == "0003_workout_follow_up"
+                assert MigrationContext.configure(c).get_current_revision() == "0004_auth_storage"
         finally:
             db.dispose()
 

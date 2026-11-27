@@ -87,7 +87,7 @@ def main():
             stage="checking revision and schema drift"
             details,_=migration_plan(connection,url)
             print(json.dumps(details,indent=2),flush=True)
-            if details["current_revision"]!="0003_workout_follow_up" or details["planned_migrations"]:
+            if details["current_revision"]!="0004_auth_storage" or details["planned_migrations"]:
                 raise RuntimeError("Test target did not reach migration head.")
             config=alembic_config()
             config.attributes["connection"]=connection

@@ -103,7 +103,7 @@ def test_schema_and_seed_contract(engine):
     with engine.connect() as c:
         inspector=sa.inspect(c)
         assert set(inspector.get_table_names())==set(s.metadata.tables)|{"alembic_version"}
-        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==129
+        assert sum(len(inspector.get_columns(t)) for t in s.metadata.tables)==151
         # The human-readable dictionary is an independent nullability contract.
         import re
         design=(Path(__file__).resolve().parents[2]/'docs/database/design.md').read_text(encoding='utf-8')
@@ -128,14 +128,13 @@ def test_schema_and_seed_contract(engine):
             assert [x["name"] for x in inspector.get_columns(table.name)]==list(table.columns.keys())
             assert inspector.get_pk_constraint(table.name)["constrained_columns"]==[x.name for x in table.primary_key]
             actual={tuple(fk["constrained_columns"]):fk["options"].get("ondelete") for fk in inspector.get_foreign_keys(table.name)}
-            for col in table.columns:
-                for fk in col.foreign_keys:
-                    assert actual[(col.name,)]==fk.ondelete
+            for fk in table.foreign_key_constraints:
+                assert actual[tuple(fk.column_keys)]==fk.ondelete
             actual_indexes={i["name"] for i in inspector.get_indexes(table.name)}
             assert {i.name for i in table.indexes}<=actual_indexes
-            assert {i.name for i in table.constraints if isinstance(i,sa.CheckConstraint)} <= {
+            assert {i.name for i in table.constraints if isinstance(i,sa.CheckConstraint) and i.name is not None} <= {
                 i["name"] for i in inspector.get_check_constraints(table.name)}
-        assert MigrationContext.configure(c).get_current_revision()=="0003_workout_follow_up"
+        assert MigrationContext.configure(c).get_current_revision()=="0004_auth_storage"
         cats=c.execute(sa.select(s.exercise_categories).order_by(s.exercise_categories.c.sort_order)).mappings().all()
         assert [x["name"] for x in cats]==["Barbell","Dumbbell","Machine/Other","Bodyweight","Assisted Bodyweight","Reps Only","Cardio","Duration"]
         assert [x["id"] for x in cats]==list(range(1,9))
@@ -316,7 +315,7 @@ def test_plan_and_repeat_upgrade_are_read_only_at_head(engine):
     """No migration/seed recreation at head and stale approval tokens fail."""
     with engine.connect() as c:
         details,token=migration_plan(c,database_url())
-        assert details["current_revision"]=="0003_workout_follow_up" and details["planned_migrations"]==[]
+        assert details["current_revision"]=="0004_auth_storage" and details["planned_migrations"]==[]
         count=c.execute(sa.select(sa.func.count()).select_from(s.exercise_categories)).scalar_one()
     config=alembic_config()
     config.attributes["disposable_test"]=True
@@ -560,3 +559,59 @@ def test_provider_json_shapes(engine,column,value):
         ex=exercise(c)
         c.execute(s.provider_exercises.update().where(s.provider_exercises.c.exercise_id==ex).values(**{column:value}))
     rejects(engine,operation)
+
+
+def test_auth_storage_ownership_and_ciphertext_shape(engine):
+    """Store multiple sessions and opaque Apple ciphertext with valid ownership."""
+    with engine.begin() as c:
+        owner, other = user(c), user(c)
+        apple = c.execute(s.user_identities.insert().values(
+            user_id=owner, provider="apple", issuer="synthetic-apple", subject=str(uuid4()),
+        ).returning(s.user_identities.c.id)).scalar_one()
+        google = c.execute(s.user_identities.insert().values(
+            user_id=owner, provider="google", issuer="synthetic-google", subject=str(uuid4()),
+        ).returning(s.user_identities.c.id)).scalar_one()
+        c.execute(s.auth_sessions.insert(), [
+            dict(token_hash=os.urandom(32), identity_id=apple, user_id=owner),
+            dict(token_hash=os.urandom(32), identity_id=apple, user_id=owner),
+        ])
+        c.execute(s.apple_revocation_credentials.insert().values(
+            identity_id=apple, ciphertext=b"synthetic opaque bytes", key_version="test-v1",
+        ))
+    rejects(engine, lambda c: c.execute(s.auth_sessions.insert().values(
+        token_hash=os.urandom(32), identity_id=apple, user_id=other,
+    )))
+    rejects(engine, lambda c: c.execute(s.apple_revocation_credentials.insert().values(
+        identity_id=google, ciphertext=b"synthetic opaque bytes", key_version="test-v1",
+    )))
+    rejects(engine, lambda c: c.execute(s.apple_revocation_credentials.update().where(
+        s.apple_revocation_credentials.c.identity_id == apple,
+    ).values(ciphertext=b"")))
+    rejects(engine, lambda c: c.execute(s.user_identities.insert().values(
+        user_id=owner, provider="microsoft", issuer="synthetic-microsoft", subject=str(uuid4()),
+    )))
+
+
+def test_auth_transaction_concurrent_consumption(engine):
+    """Only one consumer can claim the bound transaction, and replay cannot reset it."""
+    tx = s.auth_transactions
+    state, binding = os.urandom(32), os.urandom(32)
+    with engine.begin() as c:
+        c.execute(tx.insert().values(
+            state_hash=state, binding_hash=binding, nonce_hash=os.urandom(32),
+            provider="apple", purpose="login", return_path="/",
+            expires_at=sa.func.statement_timestamp() + sa.text("interval '5 minutes'"),
+        ))
+
+    def consume(browser):
+        """Claim the transaction only when its state and browser binding match."""
+        with engine.begin() as c:
+            return c.execute(tx.update().where(
+                tx.c.state_hash == state, tx.c.binding_hash == browser,
+                tx.c.provider == "apple", tx.c.purpose == "login", tx.c.consumed_at.is_(None),
+            ).values(consumed_at=sa.func.statement_timestamp())).rowcount
+
+    assert consume(os.urandom(32)) == 0
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(consume, (binding, binding))) == [0, 1]
+    rejects(engine, lambda c: c.execute(tx.update().where(tx.c.state_hash == state).values(consumed_at=None)))

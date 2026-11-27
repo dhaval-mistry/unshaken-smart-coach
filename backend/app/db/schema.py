@@ -1,4 +1,4 @@
-"""SQLAlchemy Core tables matching the reviewed 13-table database design.
+"""SQLAlchemy Core tables matching the reviewed database design.
 
 Alembic revisions use frozen SQL, so later metadata edits cannot rewrite history.
 """
@@ -36,9 +36,11 @@ user_identities = sa.Table(
     sa.Column("email_verified", sa.Boolean, nullable=True),
     sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-    sa.CheckConstraint("provider IN ('google', 'microsoft')", name="ck_user_identities_1"),
+    sa.CheckConstraint("provider IN ('google', 'apple', 'microsoft')", name="ck_user_identities_1"),
     sa.CheckConstraint("issuer = btrim(issuer) AND issuer <> ''", name="ck_user_identities_2"),
     sa.CheckConstraint("subject = btrim(subject) AND subject <> ''", name="ck_user_identities_3"),
+    sa.UniqueConstraint("id", "user_id", name="uq_auth_identity_owner"),
+    sa.UniqueConstraint("id", "provider", name="uq_auth_identity_provider"),
     sa.UniqueConstraint("provider", "issuer", "subject", name="uq_user_identities_provider_issuer_subject"),
 )
 
@@ -277,10 +279,65 @@ session_sets = sa.Table(
     sa.CheckConstraint("actual_weight < 'Infinity'::numeric", name="ck_session_sets_actual_weight_finite"),
 )
 
+auth_sessions = sa.Table(
+    "auth_sessions", metadata,
+    sa.Column("token_hash", sa.LargeBinary, primary_key=True),
+    sa.Column("user_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("identity_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
+    sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
+    sa.Column("revoked_at", sa.DateTime(timezone=True)),
+    sa.CheckConstraint("octet_length(token_hash) = 32"),
+    sa.CheckConstraint("isfinite(created_at) AND isfinite(last_seen_at) AND last_seen_at >= created_at AND last_seen_at <= created_at + interval '8 hours'"),
+    sa.CheckConstraint("revoked_at IS NULL OR (isfinite(revoked_at) AND revoked_at >= created_at)"),
+    sa.ForeignKeyConstraint(["identity_id", "user_id"], ["user_identities.id", "user_identities.user_id"],
+                            ondelete="RESTRICT", onupdate="RESTRICT"),
+)
+
+auth_transactions = sa.Table(
+    "auth_transactions", metadata,
+    sa.Column("binding_hash", sa.LargeBinary, nullable=False),
+    sa.Column("state_hash", sa.LargeBinary, primary_key=True),
+    sa.Column("nonce_hash", sa.LargeBinary, nullable=False),
+    sa.Column("provider", sa.String(20), nullable=False),
+    sa.Column("purpose", sa.String(20), nullable=False),
+    sa.Column("verified_issuer", sa.String(512)),
+    sa.Column("verified_subject", sa.String(512)),
+    sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT", onupdate="RESTRICT")),
+    sa.Column("return_path", sa.String(512), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("consumed_at", sa.DateTime(timezone=True)),
+    sa.CheckConstraint("octet_length(binding_hash) = 32"),
+    sa.CheckConstraint("octet_length(state_hash) = 32"),
+    sa.CheckConstraint("octet_length(nonce_hash) = 32"),
+    sa.CheckConstraint("provider IN ('google', 'apple')"),
+    sa.CheckConstraint("purpose IN ('login', 'link', 'onboarding')"),
+    sa.CheckConstraint("left(return_path, 1) = '/' AND left(return_path, 2) <> '//' AND strpos(return_path, chr(92)) = 0 AND return_path !~ '[[:cntrl:]]'"),
+    sa.CheckConstraint("(purpose = 'onboarding' AND verified_issuer IS NOT NULL AND verified_subject IS NOT NULL AND btrim(verified_issuer) <> '' AND btrim(verified_subject) <> '') OR (purpose <> 'onboarding' AND verified_issuer IS NULL AND verified_subject IS NULL)"),
+    sa.CheckConstraint("(purpose = 'link') = (user_id IS NOT NULL)"),
+    sa.CheckConstraint("isfinite(created_at) AND expires_at > created_at AND expires_at <= created_at + interval '5 minutes'"),
+    sa.CheckConstraint("consumed_at IS NULL OR (consumed_at >= created_at AND consumed_at < expires_at)"),
+)
+
+apple_revocation_credentials = sa.Table(
+    "apple_revocation_credentials", metadata,
+    sa.Column("identity_id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("provider", sa.String(20), nullable=False, server_default=sa.text("'apple'")),
+    sa.Column("ciphertext", sa.LargeBinary, nullable=False),
+    sa.Column("key_version", sa.String(64), nullable=False),
+    sa.CheckConstraint("provider = 'apple'"),
+    sa.CheckConstraint("octet_length(ciphertext) BETWEEN 1 AND 16384"),
+    sa.CheckConstraint("key_version ~ '^[A-Za-z0-9._-]+$'"),
+    sa.ForeignKeyConstraint(["identity_id", "provider"], ["user_identities.id", "user_identities.provider"],
+                            ondelete="RESTRICT", onupdate="RESTRICT"),
+)
+
 # Every referencing FK has an index; shared subtype primary keys already do.
 for table in metadata.tables.values():
     for column in table.columns:
-        if column.foreign_keys and not column.primary_key:
+        # The Apple credential PK already supports its composite identity FK.
+        if column.foreign_keys and not column.primary_key and table is not apple_revocation_credentials:
             sa.Index(f"ix_{table.name}_{column.name}", column)
         if column.name.endswith("_id_snapshot"):
             sa.Index(f"ix_{table.name}_{column.name}", column)
