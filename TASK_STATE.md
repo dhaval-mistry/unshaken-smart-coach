@@ -1,18 +1,18 @@
-# Task state
+﻿# Task state
 
 ## Latest completed milestone
 
-- Date: 2026-11-27.
-- Added the requested Token and Resource Efficiency guidance to `AGENTS.md`.
-- Validation: `git diff --check` passed; no tests needed for instruction-only edits.
-- Owner authorized committing these instruction/handoff changes to `main` and
-  synchronizing with GitHub. Consult Git history for publication status.
+- Implemented issue #46 on feature/46-auth-storage. Revision 0004 adds
+  authentication sessions, single-use transactions, and bounded Apple
+  credential ciphertext and key-version storage.
+- Existing migrations 0001–0003 remain frozen. The upgrade does not rewrite
+  legacy identities or workout data.
+- Verification uses the repository's disposable PostgreSQL 17 runner.
+- PR #49 review follow-up checks transaction expiry at consumption time and
+  covers already expired transactions separately from concurrent consumption.
 
 ## Next handoff
 
-- Authentication design is approved at `8d6be20`.
-- Issue #46 is Ready for a separately requested Developer.
-- Delivery order: #46 storage → #48 authentication → #22 custom exercises → #23 templates.
-- Owner-managed provider/HTTPS setup in #47 can proceed alongside #46; real
-  provider verification is required before authentication is complete.
-- No implementation or merge is authorized by this instruction update.
+- Review the #46 pull request before any merge or database rollout.
+- Issue #48 owns FastAPI authentication and encryption before persistence.
+- Issue #47 is the owner-managed provider and local HTTPS setup.
