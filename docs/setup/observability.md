@@ -2,8 +2,13 @@
 
 The optional Docker Compose profile runs Alloy, Mimir, Loki, Tempo and Grafana.
 It is independent of PostgreSQL. See the [architecture and approved decisions](../architecture/observability.md).
-The shared Python OpenTelemetry package and synthetic API/script examples are
-implemented. Product API endpoints remain separate work.
+The foundation API implements liveness, readiness, and read-only category and
+body-part lookups (`GET /health/live`, `GET /health/ready`,
+`GET /api/v1/exercise-categories`, and `GET /api/v1/body-parts`). Broader
+exercise and workout APIs remain planned. The shared Python OpenTelemetry
+package and synthetic API/script examples are implemented. Issue #15 adds
+request instrumentation to the real foundation routes; the synthetic examples
+below remain separate and do not substitute for API verification.
 
 ## Before starting
 
@@ -109,6 +114,114 @@ Live log records were matched to Tempo traces by their trace IDs. SDK in-memory
 tests also checked this correlation and dropped unknown free-text events.
 These checks do not guarantee that arbitrary future code cannot emit sensitive
 data; callers must use the documented safe helpers.
+
+### Foundation API request verification (#15)
+
+The API verifier checks actual HTTP responses against an already prepared,
+fresh disposable PostgreSQL 17 database. It also checks the matching Loki log,
+Tempo trace and Mimir metrics through Grafana. It does not create, migrate,
+modify or stop a database; it refuses to run unless
+`USC_API_TELEMETRY_DISPOSABLE=1` is set and `TEST_DATABASE_URL` names a
+`unshaken_foundation_test_...` database. Confirm that the API process uses that
+same disposable URL for `DATABASE_URL`. Do not point either variable at the
+root Compose PostgreSQL service, development data or a shared database.
+
+With the prepared disposable database and observability profile already
+running, start the API from `backend/` in one PowerShell terminal:
+
+```powershell
+$env:DATABASE_URL = $env:TEST_DATABASE_URL
+$env:OTEL_SDK_DISABLED = "false"
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4318"
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal, with the same private `TEST_DATABASE_URL`, run:
+
+```powershell
+$env:USC_API_TELEMETRY_DISPOSABLE = "1"
+$env:API_TELEMETRY_BASE_URL = "http://127.0.0.1:8000"
+uv run python scripts/verify_api_telemetry.py
+```
+
+The verifier reads Grafana credentials privately from the root `.env` or
+environment. It sends synthetic requests only: three liveness polls, two
+readiness polls, one real successful category read, and one controlled `422`
+lookup rejected for an unexpected query parameter. It compares the successful
+response with rows in the disposable database, correlates each lookup's
+returned request ID to its Loki record and trace ID, retrieves that Tempo trace,
+checks the real `database.read` span, and captures Mimir counts before sending
+requests. It requires both request-counter and duration-histogram counts to
+increase by at least three liveness polls, two readiness polls, one successful
+lookup and one rejected lookup, with the expected method/status/failure labels.
+Fresh timestamps alone do not pass. An absent initial series is compared with
+zero; a reset or disappearing series is inconclusive and fails closed. Rerun
+against a stable API process after exports have settled, without concurrent
+synthetic traffic. These bounded labels cannot uniquely attribute increments
+to an individual request; the separate Loki/Tempo checks establish correlation.
+It also checks that repeated
+readiness polls caused one state-transition event, not repeated access logs.
+Stop the API normally after verification; the verifier never stops the
+observability services.
+
+Verified queries and converted metric names:
+
+```logql
+{service_name="unshaken-backend"} |= "http.request.completed"
+```
+
+```promql
+unshaken_http_server_request_count_total{job="unshaken-backend",http_route="/api/v1/exercise-categories",http_response_status_code="200"}
+unshaken_http_server_request_duration_seconds_count{job="unshaken-backend",http_route="/api/v1/exercise-categories",http_response_status_code="200"}
+unshaken_http_server_request_count_total{job="unshaken-backend",http_route="/api/v1/body-parts",http_response_status_code="422",failure_category="invalid_request"}
+```
+
+The request counter is unit `1`. The duration histogram uses seconds; Mimir
+exposes its count as
+`unshaken_http_server_request_duration_seconds_count` (with the corresponding
+`_sum` and `_bucket` series). Observed metric labels are `job`, `http_route`,
+`http_request_method`, `http_response_status_code`, and `failure_category`;
+the route and method values come from fixed allowlists, and status is bounded
+to valid HTTP codes. Request, trace and user IDs are not metric labels. Loki
+returned request/trace correlation fields as structured log metadata; its
+index-series check reported only `service_name`, not those identifiers.
+
+### Issue #15 implementation evidence
+
+The review corrections add full-verifier tests with synthetic store replies:
+zero and unchanged counts fail even when logs/traces match, positive increments
+pass, and counter resets fail closed. They also verify that an unexpected lookup
+failure has matching `internal_error` response/log/metric categories. These are
+test doubles, not additional live Grafana delivery or outage-recovery evidence.
+The earlier live run below used timestamp/label checks only; it does not prove
+that the corrected before/after metric-increment gate passed against Mimir.
+That corrected live check and same-process exporter/store recovery remain
+required verification before final acceptance; no existing stack was modified
+or restarted for these review corrections.
+
+The checks were run from the uncommitted working tree based on `f1912a9` on
+`docs/issue-14-lookup-api-status`; no shared or development database was used.
+A newly labeled PostgreSQL 17 container with a temporary filesystem was
+migrated for the check and removed afterward. The existing Alloy/Mimir/Loki/
+Tempo/Grafana services were left running.
+
+| Check | Result |
+|---|---|
+| `.\.venv\Scripts\python.exe -m pytest tests/api tests/telemetry tests/test_readiness.py -q --tb=short` from `backend/` | 72 passed; one existing Starlette/httpx deprecation warning |
+| `uv lock --check` from `backend/` | Passed |
+| `python -m py_compile` on changed backend modules, API verifier and test | Passed |
+| `python scripts/verify_api_telemetry.py` against the real API and disposable database | Real successful lookup plus controlled validation failure found in Grafana; request/log/trace correlation, database-read span, request/duration metrics, health-poll behavior and one readiness transition verified |
+| Isolated API process with an unreachable database and OTLP endpoint | Liveness `200`; readiness and lookup `503 database_unavailable`; responses remained independent of export failure |
+| Isolated API shutdown after exporter failures | 3.02 seconds for application shutdown; shared telemetry shutdown is bounded at three seconds |
+| New process after the unavailable-endpoint check, sending to the available Alloy stack | Fresh API logs, metrics and traces were discoverable in Grafana |
+
+This outage check used an unreachable local endpoint and database port; no
+Alloy, Mimir, Loki or Tempo service was stopped. It therefore verifies caller
+isolation and new-signal delivery after switching back to the available
+collector, not per-store outage/recovery behavior. Existing accepted local
+Alloy/Mimir outage limitations remain applicable. Grafana's log-to-trace UI
+click-through, service-specific outages and the combined database/collector
+outage matrix remain unverified here.
 
 A read-only memory snapshot after verification showed about 44 MiB Alloy,
 39 MiB Mimir, 76 MiB Grafana, 77 MiB Loki and 178 MiB Tempo. These observations

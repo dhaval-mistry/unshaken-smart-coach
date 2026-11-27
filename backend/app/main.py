@@ -50,6 +50,16 @@ app = FastAPI(
     title="UNShaken Smart Coach API",
     description=API_DESCRIPTION,
     lifespan=lifespan,
+    # FastAPI's native telemetry would add parallel exporters/spans, include
+    # raw URL queries, and trace every health poll. Foundation APIs use the
+    # shared app.telemetry package instead.
+    telemetry={
+        "tracing": False,
+        "metrics": False,
+        "logs": False,
+        "operation_spans": False,
+        "auto_configure": False,
+    },
     # Without this, Starlette answers /health/live/ with an empty 307 redirect
     # that is not JSON. Disabling it sends slash variants to the shared JSON
     # 404 handler, keeping /health/live as the single canonical path.

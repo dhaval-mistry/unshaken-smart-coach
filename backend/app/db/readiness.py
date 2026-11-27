@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import copy_context
 import logging
 import threading
 import time
@@ -319,7 +320,9 @@ class DatabaseReadiness:
                 )
             self._controllers.add(controller)
 
+        context = copy_context()
         future = self._executor.submit(
+            context.run,
             self._lookup_sync,
             table_name,
             deadline,
@@ -393,54 +396,64 @@ class DatabaseReadiness:
         if remaining_before_checkout < minimum_checkout_budget:
             return ReadinessState.DATABASE_UNAVAILABLE, []
 
-        connection = None
-        invalidate = False
-        try:
-            connection = self._engine.connect()
-            driver = connection.connection.driver_connection
-            if not isinstance(driver, PsycopgConnection) or not controller.attach(driver):
-                invalidate = True
-                return ReadinessState.DATABASE_UNAVAILABLE, []
+        from app.telemetry import database_read_span
+        from app.telemetry.tracing import mark_error
 
-            remaining = deadline - self._clock() - CLEANUP_HEADROOM_SECONDS
-            if remaining <= MIN_DATABASE_WORK_SECONDS or controller.requested:
-                invalidate = controller.requested
-                return ReadinessState.DATABASE_UNAVAILABLE, []
+        with database_read_span(table_name) as span:
+            connection = None
+            invalidate = False
+            try:
+                connection = self._engine.connect()
+                driver = connection.connection.driver_connection
+                if not isinstance(driver, PsycopgConnection) or not controller.attach(driver):
+                    invalidate = True
+                    return ReadinessState.DATABASE_UNAVAILABLE, []
 
-            statement_ms = max(
-                1,
-                min(MAX_STATEMENT_TIMEOUT_MS, int(remaining * 1_000)),
-            )
-            query = _lookup_statement(table_name)
-            with connection.begin():
-                connection.execute(
-                    _SET_STATEMENT_TIMEOUT,
-                    {"milliseconds": f"{statement_ms}ms"},
+                remaining = deadline - self._clock() - CLEANUP_HEADROOM_SECONDS
+                if remaining <= MIN_DATABASE_WORK_SECONDS or controller.requested:
+                    invalidate = controller.requested
+                    return ReadinessState.DATABASE_UNAVAILABLE, []
+
+                statement_ms = max(
+                    1,
+                    min(MAX_STATEMENT_TIMEOUT_MS, int(remaining * 1_000)),
                 )
-                rows = connection.execute(query).mappings().all()
-            if not rows:
-                return ReadinessState.REFERENCE_DATA_UNAVAILABLE, []
-            items = [
-                {
-                    "id": int(row["id"]),
-                    "name": str(row["name"]),
-                    "sort_order": int(row["sort_order"]),
-                }
-                for row in rows
-            ]
-            return ReadinessState.READY, items
-        except Exception as exc:
-            invalidate = invalidate or controller.uncertain
-            return self._classify_exception(exc), []
-        finally:
-            controller.detach()
-            if connection is not None:
-                try:
-                    if invalidate or controller.uncertain:
-                        connection.invalidate()
-                    connection.close()
-                except Exception:
-                    pass
+                query = _lookup_statement(table_name)
+                with connection.begin():
+                    connection.execute(
+                        _SET_STATEMENT_TIMEOUT,
+                        {"milliseconds": f"{statement_ms}ms"},
+                    )
+                    rows = connection.execute(query).mappings().all()
+                if not rows:
+                    return ReadinessState.REFERENCE_DATA_UNAVAILABLE, []
+                items = [
+                    {
+                        "id": int(row["id"]),
+                        "name": str(row["name"]),
+                        "sort_order": int(row["sort_order"]),
+                    }
+                    for row in rows
+                ]
+                return ReadinessState.READY, items
+            except Exception as exc:
+                invalidate = invalidate or controller.uncertain
+                state = self._classify_exception(exc)
+                if state in {
+                    ReadinessState.DATABASE_UNAVAILABLE,
+                    ReadinessState.INTERNAL_ERROR,
+                }:
+                    mark_error(span)
+                return state, []
+            finally:
+                controller.detach()
+                if connection is not None:
+                    try:
+                        if invalidate or controller.uncertain:
+                            connection.invalidate()
+                        connection.close()
+                    except Exception:
+                        pass
 
     async def _cancel_and_drain(
         self,
@@ -549,6 +562,9 @@ class DatabaseReadiness:
                 "request_id": request_id,
             },
         )
+        from app.telemetry import log_readiness_transition
+
+        log_readiness_transition(result.state.value, request_id)
 
     def shutdown(self) -> bool:
         """Reject/cancel work, wait within a bound, then dispose the pool."""
