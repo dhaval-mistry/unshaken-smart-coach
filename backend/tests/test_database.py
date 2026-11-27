@@ -705,10 +705,10 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
         if request.method == "GET":
             return httpx.Response(200, json={"keys": [jwk]})
         data = parse_qs(request.content.decode())
-        assert data["redirect_uri"] == [f"{origin}/api/v1/auth/{verified_provider}/callback"]
         if data["grant_type"] == ["refresh_token"]:
             assert data["refresh_token"] == [refresh]
             return httpx.Response(200, json={"access_token": "discarded-test-access"})
+        assert data["redirect_uri"] == [f"{origin}/api/v1/auth/{verified_provider}/callback"]
         assert data["code"] == ["synthetic-code"]
         if verified_provider == "google":
             assert len(data["code_verifier"][0]) == 43
