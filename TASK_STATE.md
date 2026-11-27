@@ -8,6 +8,8 @@
 - Existing migrations 0001–0003 remain frozen. The upgrade does not rewrite
   legacy identities or workout data.
 - Verification uses the repository's disposable PostgreSQL 17 runner.
+- PR #49 review follow-up checks transaction expiry at consumption time and
+  covers already expired transactions separately from concurrent consumption.
 
 ## Next handoff
 

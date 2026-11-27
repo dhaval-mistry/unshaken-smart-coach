@@ -95,17 +95,24 @@ def upgrade():
 
         CREATE FUNCTION public.usc_auth_transaction_guard() RETURNS trigger
         LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+        DECLARE
+          consumption_time timestamptz;
         BEGIN
           IF TG_OP = 'INSERT' THEN
             IF NEW.consumed_at IS NOT NULL THEN
               RAISE EXCEPTION 'New authentication transactions must be unconsumed' USING ERRCODE = '23514';
             END IF;
-          ELSIF OLD.consumed_at IS NOT NULL OR OLD.expires_at <= statement_timestamp()
+            RETURN NEW;
+          END IF;
+
+          -- Check expiry when the row is actually being consumed.
+          consumption_time := clock_timestamp();
+          IF OLD.consumed_at IS NOT NULL OR OLD.expires_at <= consumption_time
              OR (to_jsonb(NEW) - 'consumed_at') IS DISTINCT FROM (to_jsonb(OLD) - 'consumed_at')
              OR NEW.consumed_at IS NULL THEN
             RAISE EXCEPTION 'Authentication transaction cannot be consumed' USING ERRCODE = '23514';
           ELSE
-            NEW.consumed_at := statement_timestamp();
+            NEW.consumed_at := consumption_time;
           END IF;
           RETURN NEW;
         END;

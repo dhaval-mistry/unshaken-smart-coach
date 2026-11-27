@@ -592,6 +592,24 @@ def test_auth_storage_ownership_and_ciphertext_shape(engine):
     )))
 
 
+def test_auth_transaction_expiry(engine):
+    """Reject consumption of an already expired authentication transaction."""
+    tx = s.auth_transactions
+    state = os.urandom(32)
+    with engine.begin() as c:
+        c.execute(tx.insert().values(
+            state_hash=state, binding_hash=os.urandom(32), nonce_hash=os.urandom(32),
+            provider="apple", purpose="login", return_path="/",
+            created_at=sa.func.statement_timestamp() - sa.text("interval '6 minutes'"),
+            expires_at=sa.func.statement_timestamp() - sa.text("interval '1 minute'"),
+        ))
+
+    rejects(engine, lambda c: c.execute(tx.update().where(tx.c.state_hash == state)
+                                      .values(consumed_at=sa.func.statement_timestamp())))
+    with engine.connect() as c:
+        assert c.execute(sa.select(tx.c.consumed_at).where(tx.c.state_hash == state)).scalar_one() is None
+
+
 def test_auth_transaction_concurrent_consumption(engine):
     """Only one consumer can claim the bound transaction, and replay cannot reset it."""
     tx = s.auth_transactions
