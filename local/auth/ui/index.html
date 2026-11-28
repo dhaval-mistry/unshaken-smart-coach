@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Google sign-in verification</title>
+  <script src="/verify.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Local Google sign-in verification</h1>
+    <p id="status" role="status"></p>
+    <a id="sign-in" href="/api/v1/auth/google/start" hidden>Sign in with Google</a>
+    <form id="onboarding" hidden>
+      <label>Display name <input name="display_name" maxlength="150" required></label>
+      <label>Weight unit
+        <select name="preferred_weight_unit" required>
+          <option value="">Choose a unit</option>
+          <option value="kg">kg</option>
+          <option value="lb">lb</option>
+        </select>
+      </label>
+      <button>Confirm profile</button>
+    </form>
+    <button id="sign-out" type="button" hidden>Sign out</button>
+  </main>
+</body>
+</html>

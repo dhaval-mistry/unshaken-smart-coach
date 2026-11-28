@@ -421,65 +421,105 @@ References: [SQLAlchemy constraints](https://docs.sqlalchemy.org/en/20/core/cons
 
 ### Local browser authentication
 
-Use [Caddy](https://caddyserver.com/docs/install) on Windows or Linux. Its internal
-CA provides local HTTPS without a public domain. Save this as a local Caddyfile:
+The opt-in Compose overlay serves a small verification page and the Google
+authentication routes at `https://localhost:8443`. It publishes HTTPS only
+on host loopback. FastAPI listens on loopback inside the shared network
+namespace and accepts forwarded addresses only from its Caddy peer.
 
-```caddyfile
-https://localhost:8443 {
-    bind 127.0.0.1 ::1
-    tls internal
-    handle /api/* {
-        reverse_proxy 127.0.0.1:8000
-    }
-    handle {
-        reverse_proxy 127.0.0.1:5173
-    }
-}
+Use Docker Compose 2.24.4 or newer. Run these commands from the repository
+root. Continue to use the base `compose.yaml` for normal database, backend, and
+observability work.
+
+1. In Google Auth Platform, register exactly
+   `https://localhost:8443/api/v1/auth/google/callback` under **Authorized redirect
+   URIs** for the existing Web client. Leave **Authorized JavaScript origins**
+   empty. If the OAuth audience is in Testing, add your test account privately.
+
+2. Use the existing private file or create a private copy of
+   [the placeholder JSON](authentication.local.example.json) outside the source
+   tree. The file contains the HTTPS origin, Google client ID and secret. Keep
+   Apple settings unset. On Windows, use the existing file:
+
+   ```powershell
+   $env:USC_LOCAL_AUTH_FILE = Join-Path $env:USERPROFILE '.unshaken\authentication.local.json'
+   ```
+
+   On Linux, use your private file with mode `600`. Pass your numeric user and
+   group IDs so the nonroot backend can read the owner-only bind mount:
+
+   ```bash
+   export USC_LOCAL_AUTH_FILE="$HOME/.unshaken/authentication.local.json"
+   export USC_AUTH_BACKEND_USER="$(id -u):$(id -g)"
+   ```
+
+   Compose mounts the file read-only into FastAPI. Caddy receives only the
+   static verification page and its own TLS files.
+
+3. Use a database that already has reviewed migration `0005`. The overlay
+   performs no migration. For a first test, use a disposable database. Supply
+   the existing private Compose database URL for the intended database first.
+   With that database container already running, start the HTTPS stack:
+
+   ```console
+   docker compose -f compose.yaml -f compose.auth.yaml up -d --no-deps --build --wait backend
+   docker compose -f compose.yaml -f compose.auth.yaml up -d --no-deps --force-recreate caddy
+   ```
+
+4. Export only the public Caddy root certificate. Keep the named Caddy data
+   volume so it can reuse the same local CA on later starts:
+
+   On Windows:
+
+   ```powershell
+   $ca = Join-Path $env:USERPROFILE '.unshaken\unshaken-local-auth-root.crt'
+   docker compose -f compose.yaml -f compose.auth.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca"
+   ```
+
+   On Linux:
+
+   ```bash
+   ca="$HOME/.unshaken/unshaken-local-auth-root.crt"
+   docker compose -f compose.yaml -f compose.auth.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca"
+   ```
+
+   If the file is not ready yet, retry after Caddy starts. Inspect the
+   certificate before installing it. Installing browser trust is a local
+   owner action. On Windows, for the current user:
+
+   ```powershell
+   certutil -dump "$ca"
+   certutil -user -addstore Root "$ca"
+   ```
+
+   On Debian or Ubuntu, to use the Linux system trust store:
+
+   ```bash
+   sudo install -m 0644 "$ca" /usr/local/share/ca-certificates/unshaken-local-auth-root.crt
+   sudo update-ca-certificates
+   ```
+
+   On Fedora or RHEL, use `sudo trust anchor "$ca"`.
+   If the browser uses a separate certificate store, import only this public
+   certificate under Authorities. Restart the browser if needed. Keep the
+   exported certificate and the CA private key out of the repository.
+
+5. Open `https://localhost:8443` and confirm there is no certificate warning.
+   Start Google sign-in, confirm a display name and unit if onboarding is
+   shown, verify the signed-in state, and log out. Do not publish account
+   details, cookie values, redirects or callback query strings as evidence.
+   Caddy access logs are disabled and request error logs are excluded.
+   FastAPI native access logs are disabled for this stack.
+
+To stop the optional setup while keeping both database and CA volumes:
+
+```console
+docker compose -f compose.yaml -f compose.auth.yaml stop caddy backend
 ```
 
-Run `caddy run --config Caddyfile` while the local UI and FastAPI are running.
-Use the same OS account and Caddy data directory for `caddy trust` if installation
-of the local root CA did not happen automatically. Verify the browser trusts
-the certificate before signing in. Keep the CA private key local. Do not add
-access logging for the proxy; run the direct backend with `--no-access-log`.
-Configure the UI to call relative `/api` paths and serve `/auth/complete` and
-`/auth/error`. The error page can offer a fresh Google sign-in. Start on
-`https://localhost:8443` so the UI and cookies use that exact origin.
+To return to the ordinary local backend, remove the stopped Caddy container
+before starting the backend from the base configuration:
 
-In Google Auth Platform, open your Web application client and add exactly
-`https://localhost:8443/api/v1/auth/google/callback` to **Authorized redirect URIs**.
-Leave **Authorized JavaScript origins** empty for this server-side redirect flow.
-If the OAuth audience is in Testing, add the Google account you will sign in with
-as a test user.
-
-Copy [the placeholder JSON](authentication.local.example.json) outside the
-repository and build context. Restrict the copy to your account (user-only ACL
-on Windows, `chmod 600` on Linux), then replace both placeholders. Point FastAPI
-at the private copy:
-
-```powershell
-$env:USC_AUTH_SETTINGS_FILE = 'C:\path\to\private\authentication.local.json'
+```console
+docker compose -f compose.yaml -f compose.auth.yaml rm -f caddy
+docker compose -f compose.yaml up -d --no-deps backend
 ```
-
-```bash
-export USC_AUTH_SETTINGS_FILE="$HOME/.config/unshaken/authentication.local.json"
-```
-
-For Docker, mount the private file read-only and set the variable to the
-container path. This minimal file configures the Google-only release. Leave
-Apple settings and encryption keys unset for local Google sign-in.
-The retained Apple code and migration do not enable Apple endpoints or account
-linking. Use a disposable PostgreSQL 17 database for local authentication checks.
-
-For direct local use with Caddy, run FastAPI on loopback and accept forwarded
-addresses only from that loopback proxy:
-
-```powershell
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log --proxy-headers --forwarded-allow-ips 127.0.0.1
-```
-
-Leave Caddy's default untrusted upstream client handling in place so it
-replaces incoming forwarded address information before proxying. Google starts
-use the derived source address for their ten-attempt, five-minute admission
-window. The application stores a keyed digest of the address. Addresses
-shared by users behind the same NAT also share that window.

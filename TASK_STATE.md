@@ -60,3 +60,13 @@
   successor atomically. Sessions in other browsers remain available.
 - Expected Google callback failures return to the fixed same-origin
   `/auth/error` page without a query string or provider details.
+
+## Local HTTPS handoff
+
+- `compose.auth.yaml` opts into a loopback Caddy origin on port 8443. It mounts
+  the private runtime file only into FastAPI and serves a small static Google
+  sign-in verification page.
+- The setup guide records Windows and Linux certificate trust steps. Owner
+  trust and live Google sign-in remain manual. Use disposable PostgreSQL for
+  first verification and leave the existing database and observability stack
+  in place.
