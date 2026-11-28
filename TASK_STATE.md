@@ -79,3 +79,10 @@
   span exporter, and checks that both operations attempted export.
 - The optional Caddy verifier provisions only its own synthetic PostgreSQL
   database and checks the throttled HTTP response through local HTTPS.
+
+## PR #50 verifier review follow-up
+
+- Verify the published HTTPS source against a measured Docker TCP peer and
+  check that caller forwarding input does not change the limit window.
+- The disposable verifier reports its project and exits nonzero if cleanup
+  fails. It never prints raw Compose output or verification cookie data.

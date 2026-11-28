@@ -524,7 +524,23 @@ docker compose -f compose.yaml -f compose.auth.yaml rm -f caddy
 docker compose -f compose.yaml up -d --no-deps backend
 ```
 
-For a synthetic rate-limit check without a browser or provider credentials, run
+For a synthetic source and rate-limit check without provider credentials, run
 `uv run --no-project --python 3.12 python scripts/verify_auth_proxy.py` from the
-repository root. It verifies HTTP 429 and `Retry-After` through Caddy using a
-separate disposable Compose project with no published ports.
+repository root. It starts its own disposable PostgreSQL and publishes test
+listeners on randomly assigned IPv4 loopback ports. It measures the TCP source
+Docker presents, compares that address to the database window key after serving
+HTTPS through Caddy and Uvicorn, checks that an inert client-supplied forwarding
+header leaves both requests in the same window, and verifies HTTP 429 and
+`Retry-After` from the saturated window.
+
+Docker Desktop on Windows may show a Docker network peer for local requests.
+Browsers behind that peer share one limit window. This local test verifies
+attribution at the Docker boundary. A production ingress would need its own
+explicit proxy trust configuration and source verification.
+
+If verifier cleanup fails, the command exits nonzero and prints the unique
+`usc-proxy-test-...` project and label-filtered inspection commands. Inspect
+only those labeled resources. After confirming they belong to the disposable
+project, remove those specific containers, volumes, network, and the matching
+`unshaken-backend:<project>` image tag if present. Leave the browser verification
+project and development database volumes in place.
