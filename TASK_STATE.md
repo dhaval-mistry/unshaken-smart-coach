@@ -86,3 +86,26 @@
   check that caller forwarding input does not change the limit window.
 - The disposable verifier reports its project and exits nonzero if cleanup
   fails. It never prints raw Compose output or verification cookie data.
+
+## PR #50 release handoff
+
+- Product Owner approved Windows with Docker Desktop (Linux containers) as the
+  current supported development environment. Native Linux host/browser
+  verification is deferred and is not a release acceptance requirement.
+- The Code Reviewer and Tester reports were accepted and recorded on PR #50.
+  Windows and Linux-container disposable PostgreSQL suites each passed 263
+  tests; root regression tests passed 22. The live Google browser result remains
+  owner-reported and distinct from synthetic checks.
+- Setup and authentication architecture docs now describe the supported
+  environment and deferred native Linux verification.
+- PR #50 is authorized for merge after its applicable release gates. After
+  merge, close #47 and #48 and verify #46 remains closed.
+- Non-blocking follow-ups are #51 (production-ingress source attribution) and
+  #52 (image-removal failure regression). Keep both in Project 5 Backlog.
+- The #22 creation scope is independent of provider/search decisions from #21,
+  and #3/#4/#14 plus the authentication dependency will be complete after #48.
+  Keep #22 not Ready for now: [the canonical exercise API proposal](docs/api/exercises.md)
+  still says its #22 path, transport fields and error contract need owner review.
+  Do not begin implementation until that contract is approved.
+- Project 5 updates remain pending because the authenticated GitHub CLI does
+  not have the required `read:project` scope; do not expose credentials.

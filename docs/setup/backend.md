@@ -426,6 +426,17 @@ authentication routes at `https://localhost:8443`. It publishes HTTPS only
 on host loopback. FastAPI listens on loopback inside the shared network
 namespace and accepts forwarded addresses only from its Caddy peer.
 
+**Current supported development environment:** Windows with Docker Desktop
+using Linux containers. Native Linux-host and native Linux-browser
+verification are deferred and are not release acceptance requirements for
+#47/#48. The #48 backend suite also passed inside Linux containers under
+Docker Desktop; this does not establish native Linux host support.
+
+The owner-reported live Google browser result is recorded on
+[issue #47](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/47).
+It is distinct from the Tester’s synthetic Caddy checks and signed-fixture
+tests. The original browser report does not identify its host platform.
+
 Use Docker Compose 2.24.4 or newer. Run these commands from the repository
 root. Continue to use the base `compose.yaml` for normal database, backend, and
 observability work.
@@ -444,8 +455,9 @@ observability work.
    $env:USC_LOCAL_AUTH_FILE = Join-Path $env:USERPROFILE '.unshaken\authentication.local.json'
    ```
 
-   On Linux, use your private file with mode `600`. Pass your numeric user and
-   group IDs so the nonroot backend can read the owner-only bind mount:
+   For future native Linux setup (deferred for the current supported
+   environment), use your private file with mode `600`. Pass your numeric user
+   and group IDs so the nonroot backend can read the owner-only bind mount:
 
    ```bash
    export USC_LOCAL_AUTH_FILE="$HOME/.unshaken/authentication.local.json"
@@ -475,7 +487,8 @@ observability work.
    docker compose -f compose.yaml -f compose.auth.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca"
    ```
 
-   On Linux:
+   For future native Linux setup (deferred for the current supported
+   environment):
 
    ```bash
    ca="$HOME/.unshaken/unshaken-local-auth-root.crt"
@@ -509,6 +522,16 @@ observability work.
    details, cookie values, redirects or callback query strings as evidence.
    Caddy access logs are disabled and request error logs are excluded.
    FastAPI native access logs are disabled for this stack.
+
+### Authentication verification status
+
+At PR #50 commit `cb28eeb`, the backend suite passed on Windows with disposable
+PostgreSQL 17 (263 tests), and the complete suite also passed in Linux
+containers under Docker Desktop on Windows (263 tests; Alembic reported no
+drift). The latter is Linux-container execution, not a native Linux host run.
+The owner-reported live browser result covers Google sign-in, first onboarding,
+logout, and returning sign-in; keep it separate from automated fixture and
+synthetic HTTPS results. Native Linux host/browser verification is deferred.
 
 To stop the optional setup while keeping both database and CA volumes:
 

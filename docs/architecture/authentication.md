@@ -119,11 +119,15 @@ origin. Keep credentials in a private runtime file outside the source tree.
 
 Use signed Google fixtures and disposable PostgreSQL 17 for proof validation,
 replay, concurrent onboarding, expiry, logout, CSRF, ownership, failure handling,
-attempt limits, cleanup and safe telemetry. Verify real Google sign-in, secure
-cookies, onboarding and logout using local HTTPS on Windows and Linux. Report
-live and synthetic results separately. #47 owns local setup, and #48 owns the
-Google implementation and its browser verification. Private workout APIs depend
-on the merged Google authentication boundary and their own approved scope.
+attempt limits, cleanup and safe telemetry. The current supported development
+environment is Windows with Docker Desktop using Linux containers. The full
+backend suite also passed in Linux containers under Docker Desktop; that is not
+native Linux-host verification. Native Linux host/browser verification is
+deferred. Owner-reported live Google browser evidence, signed fixtures and
+synthetic proxy checks are distinct and must be reported separately. #47 owns
+local setup, and #48 owns the Google implementation and its browser verification.
+Private workout APIs depend on the merged Google authentication boundary and
+their own approved scope.
 
 Verify that Google starts and completes sign-in with only the placeholder
 configuration fields supplied privately. Also verify that providing Apple
