@@ -117,7 +117,7 @@ def log_http_request(
             extra={
                 **attributes,
                 "operation": "authentication" if route in AUTH_ROUTES else "lookup",
-                "outcome": "success" if status_code < 400 else "error",
+                "outcome": "success" if status_code < 400 and failure_category == "none" else "error",
                 "duration_seconds": float(duration_seconds),
                 **({"request_id": correlation_id} if correlation_id else {}),
             },

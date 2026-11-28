@@ -706,6 +706,7 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
     jwk["kid"] = "test-id"
     flow = {}
     exchanges = 0
+    provider_available = True
 
     def exchange(request):
         """Serve only the fixed Google endpoints with a local signed proof."""
@@ -715,6 +716,8 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
             return httpx.Response(200, json={"keys": [jwk]})
         assert request.url == "https://oauth2.googleapis.com/token"
         exchanges += 1
+        if not provider_available:
+            return httpx.Response(503)
         data = parse_qs(request.content.decode())
         assert data["redirect_uri"] == [f"{origin}/api/v1/auth/google/callback"]
         assert data["code"] == ["synthetic-code"]
@@ -743,7 +746,9 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
         assert callback.headers["location"] == f"{origin}/auth/complete"
         replay = TestClient(app, base_url=origin, follow_redirects=False)
         replay.cookies.set("__Host-unshaken_login", original_binding)
-        assert replay.get("/api/v1/auth/google/callback", params=callback_data).status_code == 401
+        denied = replay.get("/api/v1/auth/google/callback", params=callback_data)
+        assert (denied.status_code, denied.headers["location"]) == (303, "/auth/error")
+        assert denied.headers["cache-control"] == "no-store"
         assert exchanges == 1
         assert browser.get("/api/v1/auth/session").status_code == 401
         pending = browser.get("/api/v1/auth/onboarding").json()
@@ -761,6 +766,41 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
         assert set(current.json()) == {"display_name", "preferred_weight_unit", "csrf_token"}
         assert current.json()["preferred_weight_unit"] == "lb"
         assert current.headers["cache-control"] == "no-store"
+        def sign_in(target):
+            """Finish a fresh verified flow in the specified synthetic browser."""
+            consent = target.get("/api/v1/auth/google/start")
+            flow.update(parse_qs(urlsplit(consent.headers["location"]).query))
+            return target.get("/api/v1/auth/google/callback", params={
+                "code": "synthetic-code", "state": flow["state"][0],
+            })
+
+        provider_available = False
+        unavailable = sign_in(browser)
+        assert (unavailable.status_code, unavailable.headers["location"]) == (303, "/auth/error")
+        assert unavailable.headers["cache-control"] == "no-store"
+        assert browser.get("/api/v1/auth/session").status_code == 200
+        provider_available = True
+
+        other = TestClient(app, base_url=origin, follow_redirects=False)
+        assert sign_in(other).status_code == 303
+        other_cookie = other.cookies["__Host-unshaken_session"]
+        previous = browser.cookies["__Host-unshaken_session"]
+        rotated = sign_in(browser)
+        assert rotated.headers["location"] == f"{origin}/auth/complete"
+        assert browser.cookies["__Host-unshaken_session"] != previous
+        assert other.cookies["__Host-unshaken_session"] == other_cookie
+        from app.auth.sessions import token_hash
+
+        with engine.connect() as connection:
+            sessions = s.auth_sessions.c
+            assert connection.execute(sa.select(sessions.revoked_at).where(
+                sessions.token_hash == token_hash(previous),
+            )).scalar_one() is not None
+            assert connection.execute(sa.select(sessions.revoked_at).where(
+                sessions.token_hash == token_hash(other_cookie),
+            )).scalar_one() is None
+        assert other.get("/api/v1/auth/session").status_code == 200
+        current = browser.get("/api/v1/auth/session")
         logout = browser.post("/api/v1/auth/logout", headers={
             "Origin": origin, "X-CSRF-Token": current.json()["csrf_token"],
         })
@@ -823,3 +863,24 @@ def test_inactive_providers_do_not_use_database_or_transport(engine, monkeypatch
             s.auth_sessions.c.identity_id == identity,
         )).mappings().one()
         assert row["last_seen_at"] == row["created_at"]
+
+
+def test_session_replacement_rolls_back_on_storage_failure(engine):
+    """Keep the previous session when persisting its replacement fails."""
+    from app.auth.sessions import create_session, replace_session, token_hash
+
+    with engine.begin() as connection:
+        owner = user(connection)
+        identity = connection.execute(s.user_identities.insert().values(
+            provider="google", issuer="https://accounts.google.com",
+            subject=str(uuid4()), user_id=owner,
+        ).returning(s.user_identities.c.id)).scalar_one()
+        previous = create_session(connection, owner, identity)
+    with pytest.raises(sa.exc.IntegrityError):
+        with engine.begin() as connection:
+            replace_session(connection, owner, uuid4(), previous)
+    with engine.connect() as connection:
+        active = connection.execute(sa.select(s.auth_sessions.c.revoked_at).where(
+            s.auth_sessions.c.token_hash == token_hash(previous),
+        )).scalar_one()
+    assert active is None

@@ -48,6 +48,13 @@ def create_session(connection: Connection, user_id, identity_id) -> str:
     return token
 
 
+def replace_session(connection: Connection, user_id, identity_id, previous: str | None) -> str:
+    """Revoke the cookie's prior session and create its successor atomically."""
+    if previous is not None and valid_token(previous):
+        revoke_session(connection, previous)
+    return create_session(connection, user_id, identity_id)
+
+
 def resolve_session(connection: Connection, token: str):
     """Refresh idle expiry and resolve the user from an active session."""
     from app.db.schema import auth_sessions, user_identities, users

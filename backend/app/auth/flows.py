@@ -13,7 +13,7 @@ from app.auth.encryption import (
     encrypt_refresh_token,
 )
 from app.auth.providers import AppleRefreshRejected, ExchangeResult, Providers
-from app.auth.sessions import create_session, new_token, token_hash
+from app.auth.sessions import create_session, new_token, replace_session, token_hash
 from app.auth.settings import AuthSettings
 from app.db.schema import (
     apple_onboarding_credentials,
@@ -112,7 +112,7 @@ def _require_live_apple_proof(c: Connection, issuer: str, subject: str) -> None:
 
 
 def finish_login(c: Connection, result: ExchangeResult, binding: str,
-                 settings: AuthSettings, providers: Providers):
+                 settings: AuthSettings, providers: Providers, *, previous_session: str | None = None):
     """Issue a session to an existing identity or begin browser-bound onboarding."""
     identity = result.identity
     if identity.provider == "apple":
@@ -147,7 +147,7 @@ def finish_login(c: Connection, result: ExchangeResult, binding: str,
                     return "revoked", None
         c.execute(user_identities.update().where(ids.id == current["id"]).values(
             last_login_at=sa.func.clock_timestamp()))
-        return "session", create_session(c, current["user_id"], current["id"])
+        return "session", replace_session(c, current["user_id"], current["id"], previous_session)
 
     if identity.provider == "apple" and result.refresh_token is None:
         raise AuthenticationFailed("Restart Apple authorization")
@@ -170,7 +170,8 @@ def finish_login(c: Connection, result: ExchangeResult, binding: str,
 
 
 def finish_onboarding(
-    c: Connection, state: str, binding: str, name: str, unit: str, settings: AuthSettings, *, provider: str
+    c: Connection, state: str, binding: str, name: str, unit: str, settings: AuthSettings, *, provider: str,
+    previous_session: str | None = None,
 ) -> str:
     """Consume proof and atomically create the user, identity and session."""
     t = auth_transactions.c
@@ -208,7 +209,7 @@ def finish_onboarding(
     if refresh is not None:
         _store_apple(c, settings, identity, refresh)
         c.execute(pending.delete().where(pending.c.state_hash == tx["state_hash"]))
-    return create_session(c, owner, identity)
+    return replace_session(c, owner, identity, previous_session)
 
 
 def revoke_apple_identity(c: Connection, issuer: str, subject: str) -> None:

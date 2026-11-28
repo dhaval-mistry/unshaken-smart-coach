@@ -442,7 +442,8 @@ Use the same OS account and Caddy data directory for `caddy trust` if installati
 of the local root CA did not happen automatically. Verify the browser trusts
 the certificate before signing in. Keep the CA private key local. Do not add
 access logging for the proxy; run the direct backend with `--no-access-log`.
-Configure the UI to call relative `/api` paths. Start on
+Configure the UI to call relative `/api` paths and serve `/auth/complete` and
+`/auth/error`. The error page can offer a fresh Google sign-in. Start on
 `https://localhost:8443` so the UI and cookies use that exact origin.
 
 In Google Auth Platform, open your Web application client and add exactly

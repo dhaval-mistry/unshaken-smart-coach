@@ -140,6 +140,12 @@ def start(provider: str, request: Request):
     return response
 
 
+def _callback_error(request: Request, category: str):
+    """Navigate to a fixed same-origin UI page without encoding failure details."""
+    request.state.telemetry_failure_category = category
+    return RedirectResponse("/auth/error", 303)
+
+
 def _callback(request: Request, provider: str, values: dict):
     """Consume proof once before provider exchange and issue an approved result."""
     from app.auth.flows import AuthenticationBusy, AuthenticationFailed, consume, finish_link, finish_login
@@ -164,6 +170,7 @@ def _callback(request: Request, provider: str, values: dict):
             else:
                 result, token = finish_login(
                     connection, verified, binding, runtime.settings, runtime.providers,
+                    previous_session=request.cookies.get(SESSION_COOKIE),
                 )
         if result == "revoked":
             raise AuthenticationFailed("Identity unavailable")
@@ -175,10 +182,9 @@ def _callback(request: Request, provider: str, values: dict):
             _cookie(response, _BINDING, binding, 300, "lax")
             return response
     except (AuthenticationFailed, InvalidProviderProof):
-        response = error_response(request, 401, "authentication_failed",
-                                  "Sign-in failed. Start a fresh authorization.")
-    except (SQLAlchemyError, ProviderUnavailable, EncryptionError, AuthenticationBusy):
-        response = _database_failure(request)
+        response = _callback_error(request, "authentication_failed")
+    except (SQLAlchemyError, ProviderUnavailable, EncryptionError, AuthenticationBusy, HTTPException):
+        response = _callback_error(request, "authentication_unavailable")
     response.delete_cookie(_BINDING, path="/", secure=True, httponly=True, samesite="none")
     return response
 
@@ -254,7 +260,8 @@ def onboard(profile: Onboarding, request: Request):
     try:
         with runtime.engine.begin() as connection:
             token = finish_onboarding(connection, state, binding, name,
-                                      profile.preferred_weight_unit, runtime.settings, provider="google")
+                                      profile.preferred_weight_unit, runtime.settings, provider="google",
+                                      previous_session=request.cookies.get(SESSION_COOKIE))
     except AuthenticationFailed:
         response = error_response(request, 401, "authentication_failed",
                                   "Sign-in failed. Start a fresh authorization.")

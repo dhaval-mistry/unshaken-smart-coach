@@ -53,3 +53,10 @@
   client secret. PR #50 retains Apple code, credential storage, migration 0005,
   source admission and bounded transaction cleanup for the approved rollout.
 - Live Google browser verification remains dependent on local setup in #47.
+
+## PR #50 Google rollout review follow-up
+
+- Same-browser session replacement revokes the previous token and issues the
+  successor atomically. Sessions in other browsers remain available.
+- Expected Google callback failures return to the fixed same-origin
+  `/auth/error` page without a query string or provider details.
