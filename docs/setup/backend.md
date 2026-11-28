@@ -523,3 +523,8 @@ before starting the backend from the base configuration:
 docker compose -f compose.yaml -f compose.auth.yaml rm -f caddy
 docker compose -f compose.yaml up -d --no-deps backend
 ```
+
+For a synthetic rate-limit check without a browser or provider credentials, run
+`uv run --no-project --python 3.12 python scripts/verify_auth_proxy.py` from the
+repository root. It verifies HTTP 429 and `Retry-After` through Caddy using a
+separate disposable Compose project with no published ports.

@@ -674,7 +674,8 @@ def test_pending_apple_cleanup(engine):
         assert admit_auth_source(c, source)
 
 
-def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path):
+@pytest.mark.parametrize("exporter_outage", [False, True])
+def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path, exporter_outage):
     """Run signed Google proof through first login, session renewal and logout."""
     import json
     from types import SimpleNamespace
@@ -708,6 +709,29 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
     exchanges = 0
     provider_available = True
 
+    exporter = None
+    if exporter_outage:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter
+
+        class UnavailableExporter(SpanExporter):
+            """Simulate a transport that raises on every span export."""
+
+            def __init__(self):
+                """Count failed export attempts by canonical HTTP operation."""
+                self.attempted = set()
+
+            def export(self, spans):
+                """Fail after observing sanitized request span names."""
+                self.attempted.update(span.name for span in spans)
+                raise OSError("Synthetic telemetry transport outage")
+
+        exporter = UnavailableExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+
     def exchange(request):
         """Serve only the fixed Google endpoints with a local signed proof."""
         nonlocal exchanges
@@ -735,7 +759,8 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
         monkeypatch.setattr(app.state, "authentication", SimpleNamespace(
             settings=settings, engine=engine, providers=providers,
         ), raising=False)
-        browser = TestClient(app, base_url=origin, follow_redirects=False)
+        browser = TestClient(app, base_url=origin, follow_redirects=False,
+                             client=("127.0.0.2" if exporter_outage else "127.0.0.1", 12345))
         initiated = browser.get("/api/v1/auth/google/start")
         assert initiated.status_code == 303
         flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
@@ -781,7 +806,8 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
         assert browser.get("/api/v1/auth/session").status_code == 200
         provider_available = True
 
-        other = TestClient(app, base_url=origin, follow_redirects=False)
+        other = TestClient(app, base_url=origin, follow_redirects=False,
+                           client=("127.0.0.3" if exporter_outage else "127.0.0.4", 12345))
         assert sign_in(other).status_code == 303
         other_cookie = other.cookies["__Host-unshaken_session"]
         previous = browser.cookies["__Host-unshaken_session"]
@@ -806,6 +832,11 @@ def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path)
         })
         assert logout.status_code == 200
         assert browser.get("/api/v1/auth/session").status_code == 401
+        if exporter is not None:
+            assert {
+                "HTTP GET /api/v1/auth/google/callback",
+                "HTTP POST /api/v1/auth/logout",
+            } <= exporter.attempted
 
 
 def test_inactive_providers_do_not_use_database_or_transport(engine, monkeypatch):
@@ -884,3 +915,152 @@ def test_session_replacement_rolls_back_on_storage_failure(engine):
             s.auth_sessions.c.token_hash == token_hash(previous),
         )).scalar_one()
     assert active is None
+
+
+def _google_session_for_test(connection, display_name, *, status="active", age=None, idle=None):
+    """Insert a synthetic Google user and session for API boundary tests."""
+    from app.auth.sessions import new_token, token_hash
+
+    owner = connection.execute(s.users.insert().values(
+        display_name=display_name, preferred_weight_unit="kg", status=status,
+    ).returning(s.users.c.id)).scalar_one()
+    identity = connection.execute(s.user_identities.insert().values(
+        provider="google", issuer="https://accounts.google.com", subject=str(uuid4()),
+        user_id=owner,
+    ).returning(s.user_identities.c.id)).scalar_one()
+    token = new_token()
+    now = datetime.now(timezone.utc)
+    connection.execute(s.auth_sessions.insert().values(
+        token_hash=token_hash(token), user_id=owner, identity_id=identity,
+        created_at=now - (age or timedelta()), last_seen_at=now - (idle or timedelta()),
+    ))
+    return token
+
+
+@pytest.fixture
+def auth_test_app(engine, monkeypatch):
+    """Configure the actual API with a disposable engine and no provider calls."""
+    from types import SimpleNamespace
+
+    from app.auth.settings import AuthSettings
+    from app.main import app
+
+    settings = AuthSettings("https://localhost:8443", "test-google", "synthetic-client")
+    monkeypatch.setattr(app.state, "authentication", SimpleNamespace(
+        engine=engine, settings=settings,
+    ), raising=False)
+    return app, settings.origin
+
+
+def test_current_user_and_logout_are_isolated(engine, auth_test_app):
+    """Profiles and logout remain scoped to each browser's authenticated user."""
+    from fastapi.testclient import TestClient
+
+    app, origin = auth_test_app
+    with engine.begin() as c:
+        alice = _google_session_for_test(c, "Synthetic Alpha")
+        bob = _google_session_for_test(c, "Synthetic Beta")
+    client_a = TestClient(app, base_url=origin)
+    client_b = TestClient(app, base_url=origin)
+    client_a.cookies.set("__Host-unshaken_session", alice)
+    client_b.cookies.set("__Host-unshaken_session", bob)
+    alpha = client_a.get("/api/v1/auth/session").json()
+    beta = client_b.get("/api/v1/auth/session").json()
+    assert alpha["display_name"] == "Synthetic Alpha"
+    assert beta["display_name"] == "Synthetic Beta"
+    assert alpha["csrf_token"] != beta["csrf_token"]
+
+    def logout(browser, token):
+        """Request logout with the given browser and CSRF proof."""
+        return browser.post("/api/v1/auth/logout", headers={
+            "Origin": origin, "X-CSRF-Token": token,
+        })
+
+    assert logout(client_b, alpha["csrf_token"]).status_code == 403
+    assert client_b.get("/api/v1/auth/session").status_code == 200
+    assert logout(client_a, alpha["csrf_token"]).status_code == 200
+    assert client_a.get("/api/v1/auth/session").status_code == 401
+    assert client_b.get("/api/v1/auth/session").json()["display_name"] == "Synthetic Beta"
+
+
+@pytest.mark.parametrize("status,age,idle", [
+    ("active", timedelta(hours=1), timedelta(minutes=31)),
+    ("active", timedelta(hours=8, minutes=1), timedelta(minutes=2)),
+    ("disabled", timedelta(minutes=2), timedelta(minutes=1)),
+], ids=["idle-expiry", "absolute-expiry", "disabled-user"])
+def test_nonactive_session_is_rejected_by_api(engine, auth_test_app, status, age, idle):
+    """Idle expiry, absolute expiry and disabled users fail at the API boundary."""
+    from fastapi.testclient import TestClient
+
+    from app.auth.sessions import csrf_token, token_hash
+
+    app, origin = auth_test_app
+    with engine.begin() as c:
+        token = _google_session_for_test(c, "Synthetic Inactive", status=status, age=age, idle=idle)
+        before = c.execute(sa.select(s.auth_sessions.c.last_seen_at).where(
+            s.auth_sessions.c.token_hash == token_hash(token),
+        )).scalar_one()
+    browser = TestClient(app, base_url=origin)
+    browser.cookies.set("__Host-unshaken_session", token)
+    for response in (
+        browser.get("/api/v1/auth/session"),
+        browser.post("/api/v1/auth/logout", headers={
+            "Origin": origin, "X-CSRF-Token": csrf_token(token),
+        }),
+    ):
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "authentication_required"
+    with engine.connect() as c:
+        row = c.execute(sa.select(s.auth_sessions).where(
+            s.auth_sessions.c.token_hash == token_hash(token),
+        )).mappings().one()
+        assert row["last_seen_at"] == before
+        assert row["revoked_at"] is None
+
+
+def test_concurrent_first_onboarding_creates_one_account(engine, auth_test_app):
+    """Two independently verified browsers for one identity create one account."""
+    from threading import Barrier
+
+    from fastapi.testclient import TestClient
+    from app.auth.flows import create_transaction
+    from app.auth.sessions import csrf_token, new_token
+
+    app, origin = auth_test_app
+    subject = str(uuid4())
+    names = [f"Synthetic {uuid4()}" for _ in range(2)]
+    flows = [(new_token(), new_token()) for _ in range(2)]
+    with engine.begin() as c:
+        for state, binding in flows:
+            create_transaction(c, provider="google", purpose="onboarding", state=state,
+                               binding=binding, nonce=new_token(),
+                               issuer="https://accounts.google.com", subject=subject)
+    barrier = Barrier(2)
+
+    def complete(flow, name):
+        """Submit one legitimate onboarding flow at the concurrent boundary."""
+        state, binding = flow
+        browser = TestClient(app, base_url=origin)
+        browser.cookies.set("__Host-unshaken_onboarding", state)
+        browser.cookies.set("__Host-unshaken_login", binding)
+        barrier.wait(timeout=5)
+        response = browser.post("/api/v1/auth/onboarding", json={
+            "display_name": name, "preferred_weight_unit": "lb",
+        }, headers={"Origin": origin, "X-CSRF-Token": csrf_token(state, "onboarding")})
+        return response.status_code, "__Host-unshaken_session" in browser.cookies
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = [pool.submit(complete, flow, name) for flow, name in zip(flows, names)]
+        assert sorted(future.result(timeout=10) for future in responses) == [
+            (200, True), (401, False),
+        ]
+    with engine.connect() as c:
+        owner = c.execute(sa.select(s.user_identities.c.user_id).where(
+            s.user_identities.c.subject == subject,
+        )).scalar_one()
+        assert c.execute(sa.select(sa.func.count()).select_from(s.users).where(
+            s.users.c.display_name.in_(names),
+        )).scalar_one() == 1
+        assert c.execute(sa.select(sa.func.count()).select_from(s.auth_sessions).where(
+            s.auth_sessions.c.user_id == owner,
+        )).scalar_one() == 1

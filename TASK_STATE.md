@@ -70,3 +70,12 @@
   trust and live Google sign-in remain manual. Use disposable PostgreSQL for
   first verification and leave the existing database and observability stack
   in place.
+
+## PR #50 Tester coverage follow-up
+
+- Added disposable API checks for two-user session and logout isolation,
+  idle and absolute expiry, disabled users and concurrent first onboarding.
+- The signed Google flow exercises login and logout with a failing telemetry
+  span exporter, and checks that both operations attempted export.
+- The optional Caddy verifier provisions only its own synthetic PostgreSQL
+  database and checks the throttled HTTP response through local HTTPS.
