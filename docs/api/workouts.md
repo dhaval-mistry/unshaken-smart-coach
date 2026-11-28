@@ -14,13 +14,13 @@ records the later approval that every saved template exercise has at least one
 valid set on creation and update. PR #33 was closed without merge, so none of
 its implementation or test claims are accepted baseline behavior. Open issues
 #23, #24, #25 and #30 now record the approved minimum-set rule. The owner also
-approved D1/D2 on 2026-11-11 and D8's Google/Apple authentication design on
+approved D1/D2 on 2026-11-11 and D8's original authentication design on
 2026-11-26. D3–D7 and D9 remain explicit later-story gates where applicable.
 
 Use [shared HTTP/access/deadline rules](foundation.md), the
 [exercise contracts](exercises.md) and [database design](../database/design.md).
 All examples use synthetic UUIDs. Every route below requires verified
-Google/Apple identity and owner checks; no request user ID grants access.
+Google identity and owner checks; no request user ID grants access.
 The [approved authentication design](../architecture/authentication.md) supplies
 D8's session/linking contract; the implementation prerequisite is still unmet.
 
@@ -396,7 +396,7 @@ authorize applying a migration.
 |---|---|
 | D1 / #30 discard | Install at most one narrowly scoped database operation for an explicitly confirmed, owner-matched `in_progress` draft. If it uses `SECURITY DEFINER`, fix the safe search path, schema-qualify dependencies, revoke PUBLIC in the migration transaction and keep execution with the migration/function owner until a separately approved least-privilege backend role exists. Caller IDs, Booleans, GUCs and `SET ROLE` never authenticate or bypass history protection. Foreign, unknown, unconfirmed and terminal targets remain unchanged; retained history is never deletable through this capability. |
 | D2 / #30, future catalog edit | Reject an effective-kind change while any saved live template references the exercise. Every live reference must first be explicitly removed or replaced through a complete valid template update; creating a new exercise is preferred. Never convert targets/units or rewrite captured sessions/history. A compatible change to an unreferenced exercise requires a separately authorized edit/admin workflow. This adds no edit API, provider remapping or Assisted Bodyweight rule. |
-| D8 / all private APIs | Owner approved the [Google/Apple authentication design](../architecture/authentication.md) on 2026-11-26: direct backend login, secure cookie sessions, explicit name/unit onboarding and verified linking without automatic email merging. Implementation/migration and provider setup remain prerequisites; unlinking, recovery, account merging and erasure are separate scope. |
+| D8 / all private APIs | The [approved authentication design](../architecture/authentication.md) uses Google sign-in, secure cookie sessions and explicit name/unit onboarding. Additional providers and account linking are deferred. Implementation/migration and provider setup remain prerequisites; unlinking, recovery, account merging and erasure are separate scope. |
 
 The following D3–D7 and D9 decisions remain **unapproved** merely by appearing as
 recommendations and do not block the bounded #30 migration when kept outside it.

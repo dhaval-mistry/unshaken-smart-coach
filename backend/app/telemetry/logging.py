@@ -13,14 +13,25 @@ EVENTS = {
 }
 OPERATIONS = {"database", "lookup", "request", "script", "demo"}
 OUTCOMES = {"started", "success", "error"}
+AUTH_ROUTES = {
+    f"/api/v1/auth/{provider}/{action}"
+    for provider in ("google", "apple")
+    for action in ("start", "callback")
+} | {
+    "/api/v1/auth/session", "/api/v1/auth/onboarding", "/api/v1/auth/logout",
+    "/api/v1/auth/identities/google/link", "/api/v1/auth/identities/apple/link",
+    "/api/v1/auth/apple/notifications",
+}
 HTTP_ROUTES = {
     "/health/live",
     "/health/ready",
     "/api/v1/exercise-categories",
     "/api/v1/body-parts",
 }
+HTTP_ROUTES |= AUTH_ROUTES
 HTTP_METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
 FAILURE_CATEGORIES = {
+    "authentication_required", "authentication_failed", "authentication_unavailable", "forbidden", "rate_limited",
     "none",
     "invalid_request",
     "not_found",
@@ -96,7 +107,7 @@ def log_http_request(
     if attributes["http.route"] not in {
         "/api/v1/exercise-categories",
         "/api/v1/body-parts",
-    }:
+    } | AUTH_ROUTES:
         return
     if not isinstance(duration_seconds, (int, float)) or duration_seconds < 0:
         return
@@ -105,8 +116,8 @@ def log_http_request(
             "http.request.completed",
             extra={
                 **attributes,
-                "operation": "lookup",
-                "outcome": "success" if status_code < 400 else "error",
+                "operation": "authentication" if route in AUTH_ROUTES else "lookup",
+                "outcome": "success" if status_code < 400 and failure_category == "none" else "error",
                 "duration_seconds": float(duration_seconds),
                 **({"request_id": correlation_id} if correlation_id else {}),
             },

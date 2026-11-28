@@ -418,3 +418,152 @@ requests made. Database guards were exercised with synthetic data only.
 References: [SQLAlchemy constraints](https://docs.sqlalchemy.org/en/20/core/constraints.html),
 [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html),
 [Psycopg installation](https://www.psycopg.org/psycopg3/docs/basic/install.html).
+
+### Local browser authentication
+
+The opt-in Compose overlay serves a small verification page and the Google
+authentication routes at `https://localhost:8443`. It publishes HTTPS only
+on host loopback. FastAPI listens on loopback inside the shared network
+namespace and accepts forwarded addresses only from its Caddy peer.
+
+**Current supported development environment:** Windows with Docker Desktop
+using Linux containers. Native Linux-host and native Linux-browser
+verification are deferred and are not release acceptance requirements for
+#47/#48. The #48 backend suite also passed inside Linux containers under
+Docker Desktop; this does not establish native Linux host support.
+
+The owner-reported live Google browser result is recorded on
+[issue #47](https://github.com/dhaval-mistry/unshaken-smart-coach/issues/47).
+It is distinct from the Tester’s synthetic Caddy checks and signed-fixture
+tests. The original browser report does not identify its host platform.
+
+Use Docker Compose 2.24.4 or newer. Run these commands from the repository
+root. Continue to use the base `compose.yaml` for normal database, backend, and
+observability work.
+
+1. In Google Auth Platform, register exactly
+   `https://localhost:8443/api/v1/auth/google/callback` under **Authorized redirect
+   URIs** for the existing Web client. Leave **Authorized JavaScript origins**
+   empty. If the OAuth audience is in Testing, add your test account privately.
+
+2. Use the existing private file or create a private copy of
+   [the placeholder JSON](authentication.local.example.json) outside the source
+   tree. The file contains the HTTPS origin, Google client ID and secret. Keep
+   Apple settings unset. On Windows, use the existing file:
+
+   ```powershell
+   $env:USC_LOCAL_AUTH_FILE = Join-Path $env:USERPROFILE '.unshaken\authentication.local.json'
+   ```
+
+   For future native Linux setup (deferred for the current supported
+   environment), use your private file with mode `600`. Pass your numeric user
+   and group IDs so the nonroot backend can read the owner-only bind mount:
+
+   ```bash
+   export USC_LOCAL_AUTH_FILE="$HOME/.unshaken/authentication.local.json"
+   export USC_AUTH_BACKEND_USER="$(id -u):$(id -g)"
+   ```
+
+   Compose mounts the file read-only into FastAPI. Caddy receives only the
+   static verification page and its own TLS files.
+
+3. Use a database that already has reviewed migration `0005`. The overlay
+   performs no migration. For a first test, use a disposable database. Supply
+   the existing private Compose database URL for the intended database first.
+   With that database container already running, start the HTTPS stack:
+
+   ```console
+   docker compose -f compose.yaml -f compose.auth.yaml up -d --no-deps --build --wait backend
+   docker compose -f compose.yaml -f compose.auth.yaml up -d --no-deps --force-recreate caddy
+   ```
+
+4. Export only the public Caddy root certificate. Keep the named Caddy data
+   volume so it can reuse the same local CA on later starts:
+
+   On Windows:
+
+   ```powershell
+   $ca = Join-Path $env:USERPROFILE '.unshaken\unshaken-local-auth-root.crt'
+   docker compose -f compose.yaml -f compose.auth.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca"
+   ```
+
+   For future native Linux setup (deferred for the current supported
+   environment):
+
+   ```bash
+   ca="$HOME/.unshaken/unshaken-local-auth-root.crt"
+   docker compose -f compose.yaml -f compose.auth.yaml cp caddy:/data/caddy/pki/authorities/local/root.crt "$ca"
+   ```
+
+   If the file is not ready yet, retry after Caddy starts. Inspect the
+   certificate before installing it. Installing browser trust is a local
+   owner action. On Windows, for the current user:
+
+   ```powershell
+   certutil -dump "$ca"
+   certutil -user -addstore Root "$ca"
+   ```
+
+   On Debian or Ubuntu, to use the Linux system trust store:
+
+   ```bash
+   sudo install -m 0644 "$ca" /usr/local/share/ca-certificates/unshaken-local-auth-root.crt
+   sudo update-ca-certificates
+   ```
+
+   On Fedora or RHEL, use `sudo trust anchor "$ca"`.
+   If the browser uses a separate certificate store, import only this public
+   certificate under Authorities. Restart the browser if needed. Keep the
+   exported certificate and the CA private key out of the repository.
+
+5. Open `https://localhost:8443` and confirm there is no certificate warning.
+   Start Google sign-in, confirm a display name and unit if onboarding is
+   shown, verify the signed-in state, and log out. Do not publish account
+   details, cookie values, redirects or callback query strings as evidence.
+   Caddy access logs are disabled and request error logs are excluded.
+   FastAPI native access logs are disabled for this stack.
+
+### Authentication verification status
+
+At PR #50 commit `cb28eeb`, the backend suite passed on Windows with disposable
+PostgreSQL 17 (263 tests), and the complete suite also passed in Linux
+containers under Docker Desktop on Windows (263 tests; Alembic reported no
+drift). The latter is Linux-container execution, not a native Linux host run.
+The owner-reported live browser result covers Google sign-in, first onboarding,
+logout, and returning sign-in; keep it separate from automated fixture and
+synthetic HTTPS results. Native Linux host/browser verification is deferred.
+
+To stop the optional setup while keeping both database and CA volumes:
+
+```console
+docker compose -f compose.yaml -f compose.auth.yaml stop caddy backend
+```
+
+To return to the ordinary local backend, remove the stopped Caddy container
+before starting the backend from the base configuration:
+
+```console
+docker compose -f compose.yaml -f compose.auth.yaml rm -f caddy
+docker compose -f compose.yaml up -d --no-deps backend
+```
+
+For a synthetic source and rate-limit check without provider credentials, run
+`uv run --no-project --python 3.12 python scripts/verify_auth_proxy.py` from the
+repository root. It starts its own disposable PostgreSQL and publishes test
+listeners on randomly assigned IPv4 loopback ports. It measures the TCP source
+Docker presents, compares that address to the database window key after serving
+HTTPS through Caddy and Uvicorn, checks that an inert client-supplied forwarding
+header leaves both requests in the same window, and verifies HTTP 429 and
+`Retry-After` from the saturated window.
+
+Docker Desktop on Windows may show a Docker network peer for local requests.
+Browsers behind that peer share one limit window. This local test verifies
+attribution at the Docker boundary. A production ingress would need its own
+explicit proxy trust configuration and source verification.
+
+If verifier cleanup fails, the command exits nonzero and prints the unique
+`usc-proxy-test-...` project and label-filtered inspection commands. Inspect
+only those labeled resources. After confirming they belong to the disposable
+project, remove those specific containers, volumes, network, and the matching
+`unshaken-backend:<project>` image tag if present. Leave the browser verification
+project and development database volumes in place.

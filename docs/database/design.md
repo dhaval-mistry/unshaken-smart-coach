@@ -40,7 +40,7 @@ and the verified-command/status section in [backend setup](../setup/backend.md).
 
 Retain the previously confirmed requirements:
 
-- Google/Apple sign-in, selected by the owner on 2026-11-26 in place of Microsoft;
+- Google sign-in for the initial release, with Apple deferred;
   authentication implementation is separate work.
 - Personal and shared sample templates, ordered exercises, and ordered sets.
 - Provider exercises plus only the current user's private custom exercises.
@@ -378,7 +378,7 @@ Contact email is not globally unique. Authentication resolves user_identities, n
 |---|---|---|
 | id | UUID | Primary key. |
 | user_id | UUID | Required FK users. |
-| provider | VARCHAR(20) | Required. Current frozen schema permits google/microsoft; selected target is google/apple through a reviewed successor migration. |
+| provider | VARCHAR(20) | Required. Migration `0004` supports Google and Apple identities and preserves existing Microsoft rows. The initial FastAPI release accepts only Google. |
 | issuer | TEXT | Required; validated OIDC issuer. |
 | subject | TEXT | Required; validated subject within issuer. |
 | email_at_login | VARCHAR(320) | Nullable. |
@@ -386,7 +386,7 @@ Contact email is not globally unique. Authentication resolves user_identities, n
 | last_login_at | TIMESTAMPTZ | Nullable. |
 | created_at | TIMESTAMPTZ | Required; server creation timestamp. |
 
-Unique (provider, issuer, subject). Never store provider passwords or automatically link accounts by email. The owner-approved [authentication design](../architecture/authentication.md) defines verification, application sessions and encrypted Apple credential storage (2026-11-26). It requires a separate successor migration; do not edit frozen migrations or silently delete existing Microsoft identity rows. New auth storage does not change workout ownership/history rules or the current ER diagram's implemented tables.
+Unique (provider, issuer, subject). Never store provider passwords or automatically link accounts by email. The owner-approved [authentication design](../architecture/authentication.md) defines verification, application sessions and encrypted Apple credential storage. PR #50 retains migration `0005_apple_onboarding` and the Apple storage for future use. Apple sign-in and account linking are disabled in the initial release. Preserve frozen migrations and existing Microsoft identities. Auth storage does not change workout ownership or history rules.
 
 ### exercise_categories
 

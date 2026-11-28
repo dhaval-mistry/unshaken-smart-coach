@@ -19,7 +19,7 @@ _UNSET = object()
 class ComposeConfigurationTests(unittest.TestCase):
     """Render configuration privately; the database itself is never started."""
 
-    def render(self, password=None, backend_database_url=_UNSET):
+    def render(self, password=None, backend_database_url=_UNSET, *, auth=False):
         """Ignore private settings and return only synthetic configuration."""
         environment = {key: value for key, value in os.environ.items() if not key.startswith("POSTGRES_")}
         environment = {
@@ -35,10 +35,15 @@ class ComposeConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / "empty.env"
             env_file.write_text("")
+            files = ["-f", str(ROOT / "compose.yaml")]
+            if auth:
+                files += ["-f", str(ROOT / "compose.auth.yaml")]
+                environment["USC_LOCAL_AUTH_FILE"] = str(Path(directory) / "private.json")
+                environment["USC_AUTH_BACKEND_USER"] = "10001:10001"
             result = subprocess.run(
                 [
                     "docker", "compose", "--env-file", str(env_file),
-                    "-f", str(ROOT / "compose.yaml"), "--profile", "observability",
+                    *files, "--profile", "observability",
                     "config", "--format", "json",
                 ],
                 capture_output=True, text=True, env=environment, timeout=30,
@@ -219,3 +224,29 @@ class ComposeConfigurationTests(unittest.TestCase):
         command = dockerfile.rsplit("CMD ", 1)[1]
         self.assertNotIn("alembic", command)
         self.assertNotIn("unshaken-db", command)
+
+    def test_auth_overlay_limits_exposure_and_keeps_settings_private(self):
+        """The TLS proxy is opt-in, and only FastAPI receives the private mount."""
+        base = self.render(backend_database_url=VALID_BACKEND_URL)
+        services = self.render(backend_database_url=VALID_BACKEND_URL, auth=True)
+        self.assertNotIn("caddy", base)
+        for name in ("postgres", "alloy", "grafana"):
+            self.assertEqual(services[name], base[name])
+        backend = services["backend"]
+        self.assertEqual(
+            {(p["host_ip"], p["published"], p["target"]) for p in backend["ports"]},
+            {("127.0.0.1", "8443", 8443), ("::1", "8443", 8443)},
+        )
+        self.assertEqual(backend["environment"]["USC_AUTH_SETTINGS_FILE"],
+                         "/run/secrets/unshaken-authentication.json")
+        private_mount, = backend["volumes"]
+        self.assertEqual(private_mount["target"], "/run/secrets/unshaken-authentication.json")
+        self.assertTrue(private_mount["read_only"])
+        self.assertFalse(private_mount["bind"]["create_host_path"])
+        self.assertEqual(backend["command"][backend["command"].index("--host") + 1], "127.0.0.1")
+        self.assertIn("--no-access-log", backend["command"])
+        caddy = services["caddy"]
+        self.assertEqual(caddy["network_mode"], "service:backend")
+        self.assertNotIn("ports", caddy)
+        self.assertNotIn("environment", caddy)
+        self.assertNotIn(private_mount["source"], {v["source"] for v in caddy["volumes"]})

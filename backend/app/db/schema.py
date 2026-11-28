@@ -35,7 +35,9 @@ user_identities = sa.Table(
     sa.Column("email_at_login", sa.String(320), nullable=True),
     sa.Column("email_verified", sa.Boolean, nullable=True),
     sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
+    sa.CheckConstraint("provider_revoked_at IS NULL OR (provider = 'apple' AND isfinite(provider_revoked_at))", name="ck_auth_provider_revoked"),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+    sa.Column("provider_revoked_at", sa.DateTime(timezone=True)),
     sa.CheckConstraint("provider IN ('google', 'apple', 'microsoft')", name="ck_user_identities_1"),
     sa.CheckConstraint("issuer = btrim(issuer) AND issuer <> ''", name="ck_user_identities_2"),
     sa.CheckConstraint("subject = btrim(subject) AND subject <> ''", name="ck_user_identities_3"),
@@ -308,6 +310,8 @@ auth_transactions = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("statement_timestamp()")),
     sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("consumed_at", sa.DateTime(timezone=True)),
+    sa.Column("link_session_hash", sa.LargeBinary),
+    sa.CheckConstraint("link_session_hash IS NULL OR (purpose = 'link' AND octet_length(link_session_hash) = 32)"),
     sa.CheckConstraint("octet_length(binding_hash) = 32"),
     sa.CheckConstraint("octet_length(state_hash) = 32"),
     sa.CheckConstraint("octet_length(nonce_hash) = 32"),
@@ -332,6 +336,40 @@ apple_revocation_credentials = sa.Table(
     sa.ForeignKeyConstraint(["identity_id", "provider"], ["user_identities.id", "user_identities.provider"],
                             ondelete="RESTRICT", onupdate="RESTRICT"),
 )
+
+apple_onboarding_credentials = sa.Table(
+    "apple_onboarding_credentials", metadata,
+    sa.Column("state_hash", sa.LargeBinary,
+              sa.ForeignKey("auth_transactions.state_hash", ondelete="CASCADE", onupdate="RESTRICT"),
+              primary_key=True),
+    sa.Column("ciphertext", sa.LargeBinary, nullable=False),
+    sa.Column("key_version", sa.String(64), nullable=False),
+    sa.CheckConstraint("octet_length(ciphertext) BETWEEN 1 AND 16384"),
+    sa.CheckConstraint("key_version ~ '^[A-Za-z0-9._-]+$'"),
+)
+sa.Index("ix_auth_transactions_expires_at", auth_transactions.c.expires_at)
+sa.Index(
+    "ix_auth_transactions_apple_proof",
+    auth_transactions.c.verified_issuer, auth_transactions.c.verified_subject,
+    postgresql_where=sa.and_(
+        auth_transactions.c.provider == "apple", auth_transactions.c.purpose == "onboarding",
+    ),
+)
+
+apple_revoked_proofs = sa.Table(
+    "apple_revoked_proofs", metadata,
+    sa.Column("proof_hash", sa.LargeBinary, primary_key=True),
+    sa.CheckConstraint("octet_length(proof_hash) = 32"),
+)
+auth_source_windows = sa.Table(
+    "auth_source_windows", metadata,
+    sa.Column("source_hash", sa.LargeBinary, primary_key=True),
+    sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("attempts", sa.Integer, nullable=False),
+    sa.CheckConstraint("octet_length(source_hash) = 32"),
+    sa.CheckConstraint("attempts BETWEEN 1 AND 10"),
+)
+sa.Index("ix_auth_source_windows_expires_at", auth_source_windows.c.expires_at)
 
 # Every referencing FK has an index; shared subtype primary keys already do.
 for table in metadata.tables.values():
