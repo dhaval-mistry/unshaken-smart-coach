@@ -674,63 +674,58 @@ def test_pending_apple_cleanup(engine):
         assert admit_auth_source(c, source)
 
 
-@pytest.mark.parametrize("provider", ["google", "apple"])
-def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provider):
-    """Run a synthetic provider exchange through onboarding, session and logout."""
+def test_browser_login_with_signed_google_fixture(engine, monkeypatch, tmp_path):
+    """Run signed Google proof through first login, session renewal and logout."""
+    import json
     from types import SimpleNamespace
     from urllib.parse import parse_qs, urlsplit
 
     import httpx
     import jwt
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+    from cryptography.hazmat.primitives.asymmetric import rsa
     from fastapi.testclient import TestClient
 
-    from app.auth.encryption import decrypt_refresh_token
     from app.auth.providers import Providers
-    from app.auth.settings import AuthSettings
+    from app.auth.settings import load_auth_settings
     from app.main import app
 
-    origin = "https://testserver"
-    verified_provider = provider
-    issuers = {
-        "google": "https://accounts.google.com", "apple": "https://appleid.apple.com",
-    }
+    origin = "https://localhost:8443"
+    issuer = "https://accounts.google.com"
+    private_config = tmp_path / "synthetic-google.json"
+    private_config.write_text(json.dumps({
+        "origin": origin,
+        "google_client_id": "google-fixture",
+        "google_client_secret": "synthetic-secret",
+    }))
+    monkeypatch.setenv("USC_AUTH_SETTINGS_FILE", str(private_config))
+    settings = load_auth_settings()
+    assert settings.encryption_keys == {}
     subject = str(uuid4())
-    refresh = "synthetic-apple-refresh"
     issuer_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    signing_key = ec.generate_private_key(ec.SECP256R1()).private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ).decode()
     jwk = jwt.algorithms.RSAAlgorithm.to_jwk(issuer_key.public_key(), as_dict=True)
     jwk["kid"] = "test-id"
-    settings = AuthSettings(
-        origin, "google-fixture", "synthetic-secret", "apple-fixture",
-        "synthetic-team", "synthetic-key", signing_key, "test.v1", {"test.v1": b"x" * 32},
-    )
     flow = {}
-    include_refresh = True
+    exchanges = 0
 
     def exchange(request):
-        """Serve a signed JWT and public keys at the fixed provider endpoints."""
+        """Serve only the fixed Google endpoints with a local signed proof."""
+        nonlocal exchanges
         if request.method == "GET":
+            assert request.url == "https://www.googleapis.com/oauth2/v3/certs"
             return httpx.Response(200, json={"keys": [jwk]})
+        assert request.url == "https://oauth2.googleapis.com/token"
+        exchanges += 1
         data = parse_qs(request.content.decode())
-        if data["grant_type"] == ["refresh_token"]:
-            assert data["refresh_token"] == [refresh]
-            return httpx.Response(200, json={"access_token": "discarded-test-access"})
-        assert data["redirect_uri"] == [f"{origin}/api/v1/auth/{verified_provider}/callback"]
+        assert data["redirect_uri"] == [f"{origin}/api/v1/auth/google/callback"]
         assert data["code"] == ["synthetic-code"]
-        if verified_provider == "google":
-            assert len(data["code_verifier"][0]) == 43
+        assert len(data["code_verifier"][0]) == 43
         now = datetime.now(timezone.utc)
         token = jwt.encode(
-            dict(iss=issuers[verified_provider], sub=subject, aud=f"{verified_provider}-fixture", nonce=flow["nonce"][0],
+            dict(iss=issuer, sub=subject, aud="google-fixture", nonce=flow["nonce"][0],
                  iat=now, exp=now + timedelta(minutes=1)),
             issuer_key, algorithm="RS256", headers={"kid": "test-id"},
         )
-        return httpx.Response(200, json={"id_token": token, "refresh_token": refresh if include_refresh else None})
+        return httpx.Response(200, json={"id_token": token})
 
     with httpx.Client(transport=httpx.MockTransport(exchange)) as transport:
         providers = Providers(settings, transport)
@@ -738,141 +733,93 @@ def test_browser_login_with_signed_provider_fixture(engine, monkeypatch, provide
             settings=settings, engine=engine, providers=providers,
         ), raising=False)
         browser = TestClient(app, base_url=origin, follow_redirects=False)
-        if provider == "apple":
-            original_subject = subject
-            subject = str(uuid4())
-            consent = browser.get("/api/v1/auth/apple/start")
-            flow.update(parse_qs(urlsplit(consent.headers["location"]).query))
-            pending_callback = browser.post("/api/v1/auth/apple/callback", data={
-                "state": flow["state"][0], "code": "synthetic-code",
-            })
-            assert pending_callback.status_code == 303, pending_callback.text
-            pending_csrf = browser.get("/api/v1/auth/onboarding").json()["csrf_token"]
-            pending_notification = jwt.encode(
-                dict(iss=issuers["apple"], aud="apple-fixture",
-                     iat=datetime.now(timezone.utc), jti=str(uuid4()),
-                     events={"type": "consent-revoked", "sub": subject}),
-                issuer_key, algorithm="RS256", headers={"kid": "test-id"},
-            )
-            notify_result = browser.post("/api/v1/auth/apple/notifications",
-                                         json={"payload": pending_notification})
-            assert notify_result.status_code == 200
-            declined = browser.post("/api/v1/auth/onboarding", json={
-                "display_name": "Synthetic Revoked User", "preferred_weight_unit": "lb",
-            }, headers={"Origin": origin, "X-CSRF-Token": pending_csrf})
-            assert declined.status_code == 401, declined.text
-            with engine.connect() as c:
-                assert not c.execute(sa.select(s.auth_transactions.c.state_hash).where(
-                    s.auth_transactions.c.verified_subject == subject,
-                )).first()
-                assert not c.execute(sa.select(s.user_identities.c.id).where(
-                    s.user_identities.c.subject == subject,
-                )).first()
-            subject = original_subject
-            include_refresh = False
-            initiated = browser.get("/api/v1/auth/apple/start")
-            flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
-            missing = browser.post("/api/v1/auth/apple/callback", data={
-                "state": flow["state"][0], "code": "synthetic-code",
-            })
-            assert missing.status_code == 401, missing.text
-            assert "fresh authorization" in missing.json()["error"]["message"]
-            assert "__Host-unshaken_onboarding" not in browser.cookies
-            include_refresh = True
-        initiated = browser.get(f"/api/v1/auth/{provider}/start")
+        initiated = browser.get("/api/v1/auth/google/start")
         assert initiated.status_code == 303
         flow.update(parse_qs(urlsplit(initiated.headers["location"]).query))
         callback_data = {"state": flow["state"][0], "code": "synthetic-code"}
-        callback_url = f"/api/v1/auth/{provider}/callback"
-        if provider == "google":
-            callback = browser.get(callback_url, params=callback_data)
-        else:
-            callback = browser.post(callback_url, data=callback_data)
+        original_binding = browser.cookies["__Host-unshaken_login"]
+        callback = browser.get("/api/v1/auth/google/callback", params=callback_data)
         assert callback.status_code == 303, callback.text
         assert callback.headers["location"] == f"{origin}/auth/complete"
-        assert refresh not in callback.text
-        if provider == "apple":
-            with engine.connect() as c:
-                pending = c.execute(
-                    sa.select(s.apple_onboarding_credentials.c.ciphertext)
-                    .join(s.auth_transactions, s.auth_transactions.c.state_hash
-                          == s.apple_onboarding_credentials.c.state_hash)
-                    .where(s.auth_transactions.c.verified_subject == subject)
-                ).scalar_one()
-                assert refresh.encode() not in pending
+        replay = TestClient(app, base_url=origin, follow_redirects=False)
+        replay.cookies.set("__Host-unshaken_login", original_binding)
+        assert replay.get("/api/v1/auth/google/callback", params=callback_data).status_code == 401
+        assert exchanges == 1
         assert browser.get("/api/v1/auth/session").status_code == 401
-        start = browser.get("/api/v1/auth/onboarding").json()
+        pending = browser.get("/api/v1/auth/onboarding").json()
         data = {"display_name": "Synthetic User", "preferred_weight_unit": "lb"}
         assert browser.post("/api/v1/auth/onboarding", json=data).status_code == 403
-        onboarded = browser.post("/api/v1/auth/onboarding", json=data, headers={
-            "Origin": origin, "X-CSRF-Token": start["csrf_token"],
+        completed = browser.post("/api/v1/auth/onboarding", json=data, headers={
+            "Origin": origin, "X-CSRF-Token": pending["csrf_token"],
         })
-        assert onboarded.status_code == 200, onboarded.text
-        cookies = onboarded.headers.get_list("set-cookie")
+        assert completed.status_code == 200, completed.text
+        cookies = completed.headers.get_list("set-cookie")
         assert any("__Host-unshaken_session=" in cookie and "Secure" in cookie
                    and "HttpOnly" in cookie and "SameSite=lax" in cookie for cookie in cookies)
         current = browser.get("/api/v1/auth/session")
         assert current.status_code == 200, current.text
+        assert set(current.json()) == {"display_name", "preferred_weight_unit", "csrf_token"}
         assert current.json()["preferred_weight_unit"] == "lb"
         assert current.headers["cache-control"] == "no-store"
-        if provider == "apple":
-            with engine.connect() as c:
-                durable = c.execute(
-                    sa.select(s.apple_revocation_credentials)
-                    .join(s.user_identities, s.user_identities.c.id
-                          == s.apple_revocation_credentials.c.identity_id)
-                    .where(s.user_identities.c.subject == subject)
-                ).mappings().one()
-                assert decrypt_refresh_token(
-                    durable["ciphertext"], durable["identity_id"], durable["key_version"],
-                    settings.encryption_keys,
-                ) == refresh.encode()
-                assert c.execute(
-                    sa.select(sa.func.count()).select_from(s.apple_onboarding_credentials)
-                    .join(s.auth_transactions, s.auth_transactions.c.state_hash
-                          == s.apple_onboarding_credentials.c.state_hash)
-                    .where(s.auth_transactions.c.verified_subject == subject)
-                ).scalar_one() == 0
-        if provider == "google":
-            old_session = browser.cookies["__Host-unshaken_session"]
-            linked = browser.post("/api/v1/auth/identities/apple/link", headers={
-                "Origin": origin, "X-CSRF-Token": current.json()["csrf_token"],
-            })
-            assert linked.status_code == 200, linked.text
-            verified_provider = "apple"
-            flow.update(parse_qs(urlsplit(linked.json()["authorization_url"]).query))
-            completed = browser.post("/api/v1/auth/apple/callback", data={
-                "state": flow["state"][0], "code": "synthetic-code",
-            })
-            assert completed.status_code == 303, completed.text
-            assert browser.cookies["__Host-unshaken_session"] != old_session
-            current = browser.get("/api/v1/auth/session")
-            assert current.status_code == 200, current.text
-        else:
-            include_refresh = False
-            restarted = browser.get("/api/v1/auth/apple/start")
-            flow.update(parse_qs(urlsplit(restarted.headers["location"]).query))
-            again = browser.post("/api/v1/auth/apple/callback", data={
-                "state": flow["state"][0], "code": "synthetic-code",
-            })
-            assert again.status_code == 303, again.text
-            with engine.connect() as c:
-                retained = c.execute(sa.select(s.apple_revocation_credentials.c.ciphertext)
-                                     .where(s.apple_revocation_credentials.c.identity_id
-                                            == durable["identity_id"])).scalar_one()
-                assert retained == durable["ciphertext"]
-            notification = jwt.encode(
-                dict(iss=issuers["apple"], aud="apple-fixture",
-                     iat=datetime.now(timezone.utc), jti=str(uuid4()),
-                     events={"type": "consent-revoked", "sub": subject}),
-                issuer_key, algorithm="RS256", headers={"kid": "test-id"},
-            )
-            delivered = browser.post("/api/v1/auth/apple/notifications", json={"payload": notification})
-            assert delivered.status_code == 200, delivered.text
-            assert browser.get("/api/v1/auth/session").status_code == 401
-            return
         logout = browser.post("/api/v1/auth/logout", headers={
             "Origin": origin, "X-CSRF-Token": current.json()["csrf_token"],
         })
         assert logout.status_code == 200
         assert browser.get("/api/v1/auth/session").status_code == 401
+
+
+def test_inactive_providers_do_not_use_database_or_transport(engine, monkeypatch):
+    """The public rollout rejects every inactive handler before side effects."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.auth.settings import AuthSettings
+    from app.main import app
+
+    class NoDatabase:
+        """Fail the test if an inactive route tries to create or update state."""
+
+        def begin(self):
+            """No transaction is authorized for an inactive route."""
+            pytest.fail("Inactive authentication route opened a database transaction")
+
+    class NoProviders:
+        """Fail the test if an inactive route accesses the provider client."""
+
+        def __getattr__(self, _name):
+            """No provider method is authorized for these routes."""
+            pytest.fail("Inactive authentication route accessed the provider client")
+
+    origin = "https://localhost:8443"
+    settings = AuthSettings(
+        origin, "google-fixture", "synthetic-secret", "apple-fixture",
+        "synthetic-team", "synthetic-key", "synthetic-PEM", "test.v1", {"test.v1": b"x" * 32},
+    )
+    monkeypatch.setattr(app.state, "authentication", SimpleNamespace(
+        settings=settings, engine=NoDatabase(), providers=NoProviders(),
+    ), raising=False)
+    browser = TestClient(app, base_url=origin, follow_redirects=False)
+    for path in ("/apple/start", "/microsoft/start"):
+        assert browser.get("/api/v1/auth" + path).status_code == 404
+    for path in ("/apple/callback", "/apple/notifications",
+                 "/identities/apple/link", "/identities/google/link"):
+        assert browser.post("/api/v1/auth" + path).status_code == 404
+
+    from app.auth.sessions import create_session
+
+    with engine.begin() as c:
+        owner = user(c)
+        identity = c.execute(s.user_identities.insert().values(
+            provider="apple", issuer="https://appleid.apple.com",
+            subject=str(uuid4()), user_id=owner,
+        ).returning(s.user_identities.c.id)).scalar_one()
+        session = create_session(c, owner, identity)
+    app.state.authentication.engine = engine
+    browser.cookies.set("__Host-unshaken_session", session)
+    assert browser.get("/api/v1/auth/session").status_code == 401
+    with engine.connect() as c:
+        row = c.execute(sa.select(s.auth_sessions).where(
+            s.auth_sessions.c.identity_id == identity,
+        )).mappings().one()
+        assert row["last_seen_at"] == row["created_at"]

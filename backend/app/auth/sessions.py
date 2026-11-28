@@ -61,7 +61,7 @@ def resolve_session(connection: Connection, token: str):
             session.identity_id == identity.id,
             identity.user_id == user.id,
             user.status == "active",
-            identity.provider.in_(("google", "apple")),
+            identity.provider == "google",
             identity.provider_revoked_at.is_(None),
             session.revoked_at.is_(None),
             session.created_at + sa.text("interval '8 hours'") > now,

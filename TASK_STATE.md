@@ -43,3 +43,13 @@
 - Login and linking admission enforce short per-source windows. Startup and
   periodic cleanup remove stale rows in bounded batches, with a small additional
   batch during transaction admission.
+
+## Google-only rollout
+
+- PR #50 serves Google sign-in and rejects Apple and linking routes before
+  touching auth state or contacting a provider. The active session and
+  onboarding boundaries accept only Google.
+- The private runtime JSON needs only the origin, Google client ID and Google
+  client secret. PR #50 retains Apple code, credential storage, migration 0005,
+  source admission and bounded transaction cleanup for the approved rollout.
+- Live Google browser verification remains dependent on local setup in #47.

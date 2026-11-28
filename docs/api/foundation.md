@@ -3,7 +3,7 @@
 Design status: **mixed**. The product and HTTP requirements in issues #12–15
 remain authoritative. The owner approved #13's bounded synchronous database
 execution direction and error classification in the Solution Architect
-follow-up on 2026-11-25. The Google/Apple authentication design was approved
+follow-up on 2026-11-25. The original authentication design was approved
 on 2026-11-26. #14's total deadline, other private-route contracts and
 later-story mechanisms remain proposals; existing approvals are not reopened.
 
@@ -39,9 +39,9 @@ The other actions below show the next design steps, not approved API contracts.
 | Cancel an active workout | Warn that Discard deletes completed draft work; Save retains completed sets and cancels unfinished sets | Later; proposed contract and migration in [workouts.md](workouts.md) |
 | Review workout history and previous performance | Read the user's preserved workout records | Later; needs history matching and correction decisions |
 
-The owner selected Google/Apple sign-in on 2026-11-26, replacing Microsoft.
+The owner selected Google-only sign-in for the initial release. Apple is deferred.
 The [approved authentication design](../architecture/authentication.md) defines
-login, sessions, linking and local testing; these are not implemented.
+login, sessions and local testing; these are not implemented.
 A user ID in a header, request body, or development setting is not authentication.
 Bodyweight may use duration instead of reps after a new database migration.
 The current migration still treats Bodyweight as reps only. These approved
@@ -95,11 +95,11 @@ not assumed to appear automatically from exception handlers.
 
 ### Private access and error boundary
 
-**Approved identity boundary for #21–29 private routes:** validate Google/Apple issuer,
+**Approved identity boundary for #21–29 private routes:** validate the Google issuer,
 signature, audience, expiry and stable subject at the shared identity
 boundary. Resolve that verified identity to the application's user; never use a
 submitted user ID, request ID, CORS origin, email alone or development header as
-proof. D8's approved cookie sessions, explicit linking, revocation and storage
+proof. D8's approved cookie sessions, revocation and storage
 are collected in the [authentication design](../architecture/authentication.md);
 see the [decision table](workouts.md#owner-decisions-and-approval-checklist). Existing
 `users`/`user_identities` do not implement sign-in by themselves.
@@ -403,7 +403,7 @@ Implementation must still provide the evidence above and receive the applicable
 review. Public no-sign-in behavior, exact shared responses and #13's three-second
 total deadline were already stated in the story; do not reopen them.
 
-The owner approved D8's identity/session/linking design on 2026-11-26; its
+The owner approved D8's original identity and session design on 2026-11-26; its
 implementation is still a separate prerequisite. Human review remains needed
 for other later-story proposals. #14's total deadline remains owner-gated, while reuse of the shared
 bounded infrastructure is the ordinary engineering direction and does not block

@@ -170,17 +170,17 @@ def finish_login(c: Connection, result: ExchangeResult, binding: str,
 
 
 def finish_onboarding(
-    c: Connection, state: str, binding: str, name: str, unit: str, settings: AuthSettings
+    c: Connection, state: str, binding: str, name: str, unit: str, settings: AuthSettings, *, provider: str
 ) -> str:
     """Consume proof and atomically create the user, identity and session."""
     t = auth_transactions.c
     proof = c.execute(sa.select(t.provider, t.verified_issuer, t.verified_subject).where(
         t.state_hash == token_hash(state), t.binding_hash == token_hash(binding),
-        t.purpose == "onboarding", t.consumed_at.is_(None),
+        t.provider == provider, t.purpose == "onboarding", t.consumed_at.is_(None),
     )).one_or_none()
     if proof is not None and proof.provider == "apple":
         _require_live_apple_proof(c, proof.verified_issuer, proof.verified_subject)
-    tx = consume(c, state, binding, None, ("onboarding",))
+    tx = consume(c, state, binding, provider, ("onboarding",))
     pending = apple_onboarding_credentials
     refresh = None
     if tx["provider"] == "apple":
@@ -283,11 +283,11 @@ def finish_link(c: Connection, tx, result: ExchangeResult, settings: AuthSetting
     return create_session(c, owner, attached)
 
 
-def onboarding_pending(c: Connection, state: str, binding: str) -> bool:
+def onboarding_pending(c: Connection, state: str, binding: str, *, provider: str) -> bool:
     """Check whether the browser still has a live verified onboarding flow."""
     t = auth_transactions.c
     return c.execute(sa.select(sa.exists().where(
         t.state_hash == token_hash(state), t.binding_hash == token_hash(binding),
-        t.purpose == "onboarding", t.consumed_at.is_(None),
+        t.provider == provider, t.purpose == "onboarding", t.consumed_at.is_(None),
         t.expires_at > sa.func.clock_timestamp(),
     ))).scalar_one()

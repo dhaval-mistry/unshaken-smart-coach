@@ -15,12 +15,12 @@ class AuthSettings:
     origin: str
     google_client_id: str
     google_client_secret: str = field(repr=False)
-    apple_client_id: str
-    apple_team_id: str
-    apple_key_id: str
-    apple_signing_key: str = field(repr=False)
-    active_key_version: str
-    encryption_keys: dict[str, bytes] = field(repr=False)
+    apple_client_id: str = ""
+    apple_team_id: str = ""
+    apple_key_id: str = ""
+    apple_signing_key: str = field(default="", repr=False)
+    active_key_version: str = ""
+    encryption_keys: dict[str, bytes] = field(default_factory=dict, repr=False)
 
     def callback(self, provider: str) -> str:
         """Return the single registered callback for the selected provider."""
@@ -39,7 +39,7 @@ def load_auth_settings() -> AuthSettings:
         values = json.loads(payload)
         values["encryption_keys"] = {
             version: base64.b64decode(key, validate=True)
-            for version, key in values["encryption_keys"].items()
+            for version, key in values.get("encryption_keys", {}).items()
         }
         settings = AuthSettings(**values)
         origin = urlsplit(settings.origin)
@@ -48,7 +48,8 @@ def load_auth_settings() -> AuthSettings:
                 or settings.origin != f"https://{origin.netloc}"
                 or any(char.isspace() for char in settings.origin)
                 or any(len(key) != 32 for key in settings.encryption_keys.values())
-                or settings.active_key_version not in settings.encryption_keys):
+                or not isinstance(settings.google_client_id, str) or not settings.google_client_id
+                or not isinstance(settings.google_client_secret, str) or not settings.google_client_secret):
             raise ValueError
     except (OSError, KeyError, TypeError, AttributeError, ValueError):
         raise ValueError("Authentication settings unavailable") from None

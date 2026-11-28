@@ -24,7 +24,9 @@ from app.auth.sessions import (
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 _BINDING = "__Host-unshaken_login"
 _ONBOARDING = "__Host-unshaken_onboarding"
-_PROVIDERS = frozenset({"apple", "google"})
+# These routes remain available to code review without entering the application.
+_deferred_router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
+_PROVIDERS = frozenset({"google"})
 
 
 class Onboarding(BaseModel):
@@ -102,7 +104,7 @@ def _admit_source(request: Request, connection, settings) -> bool:
         address = str(ip_address(request.client.host)) if request.client else "unknown"
     except ValueError:
         address = "unknown"
-    key = settings.encryption_keys[settings.active_key_version]
+    key = settings.google_client_secret.encode("utf-8")
     digest = hmac.digest(key, b"unshaken:auth-source:v1:" + address.encode("ascii"), "sha256")
     return admit_auth_source(connection, digest)
 
@@ -150,7 +152,7 @@ def _callback(request: Request, provider: str, values: dict):
             raise AuthenticationFailed("Invalid authentication flow")
         runtime = _runtime(request)
         with runtime.engine.begin() as connection:
-            transaction = consume(connection, state, binding, provider, ("login", "link"))
+            transaction = consume(connection, state, binding, provider, ("login",))
         if not code or len(code) > 4096 or "error" in values:
             raise AuthenticationFailed("Invalid authentication proof")
         verified = runtime.providers.exchange(provider, code, csrf_token(binding, state),
@@ -190,7 +192,7 @@ def google_callback(request: Request):
     return _callback(request, "google", dict(query))
 
 
-@router.post("/apple/callback")
+@_deferred_router.post("/apple/callback")
 async def apple_callback(request: Request):
     """Read a bounded Apple form POST and ignore optional user profile data."""
     try:
@@ -230,7 +232,7 @@ def onboarding_csrf(request: Request):
     binding = _opaque_cookie(request, _BINDING)
     try:
         with runtime.engine.connect() as connection:
-            if not onboarding_pending(connection, state, binding):
+            if not onboarding_pending(connection, state, binding, provider="google"):
                 raise HTTPException(401)
     except SQLAlchemyError:
         return _database_failure(request)
@@ -252,7 +254,7 @@ def onboard(profile: Onboarding, request: Request):
     try:
         with runtime.engine.begin() as connection:
             token = finish_onboarding(connection, state, binding, name,
-                                      profile.preferred_weight_unit, runtime.settings)
+                                      profile.preferred_weight_unit, runtime.settings, provider="google")
     except AuthenticationFailed:
         response = error_response(request, 401, "authentication_failed",
                                   "Sign-in failed. Start a fresh authorization.")
@@ -302,7 +304,7 @@ def _process_notification(request: Request, token: str):
     return {"status": "accepted"}
 
 
-@router.post("/apple/notifications")
+@_deferred_router.post("/apple/notifications")
 async def apple_notifications(request: Request):
     """Accept bounded JSON for Apple's signed server-to-server events."""
     try:
@@ -318,7 +320,7 @@ async def apple_notifications(request: Request):
         raise HTTPException(422) from None
     return await run_in_threadpool(_process_notification, request, token)
 
-@router.post("/identities/{provider}/link")
+@_deferred_router.post("/identities/{provider}/link")
 def link(provider: str, request: Request):
     """Start a separate linking flow after checking the source session and CSRF."""
     if provider not in _PROVIDERS:
